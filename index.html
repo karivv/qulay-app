@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Забери мусор — волонтёрская доставка</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<!-- Firebase (compat SDK — проще для одного файла) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
+<!-- Leaflet карта + маршрутизация -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg: #F7F5EF;
+    --surface: #FFFFFF;
+    --ink: #1E2A32;
+    --ink-soft: #5C6B73;
+    --line: #E5E0D3;
+    --teal: #1F6F5C;
+    --teal-dark: #164F42;
+    --amber: #E2A93B;
+    --amber-dark: #B5822A;
+    --danger: #C0523F;
+    --radius: 16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;}
+  h1,h2,h3,.display{font-family:'Fraunces',serif; font-weight:700; letter-spacing:-0.01em;}
+
+  #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding-bottom:84px;}
+
+  /* ---------- Верхняя шапка ---------- */
+  header{padding:20px 18px 14px; position:sticky; top:0; background:var(--bg); z-index:20;
+    border-bottom:1px solid var(--line);}
+  header .eyebrow{font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-soft); margin-bottom:2px;}
+  header h1{font-size:22px; margin:0;}
+  header .role-tag{display:inline-flex; align-items:center; gap:6px; margin-top:8px; font-size:13px;
+    background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:5px 12px; color:var(--ink-soft);}
+  header .role-tag button{border:none; background:none; color:var(--teal); font-weight:600; cursor:pointer; font-size:13px; padding:0;}
+
+  /* ---------- Экран выбора роли ---------- */
+  #roleScreen{flex:1; display:flex; flex-direction:column; justify-content:center; padding:24px; gap:14px; text-align:center;}
+  #roleScreen .display{font-size:28px; line-height:1.15; margin-bottom:6px;}
+  #roleScreen p.sub{color:var(--ink-soft); font-size:15px; margin:0 0 18px;}
+  .role-card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; text-align:left; cursor:pointer; transition:.15s; display:flex; align-items:center; gap:14px;}
+  .role-card:active{transform:scale(.98);}
+  .role-card .icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
+  .role-card.client .icon{background:#EAF3F0; }
+  .role-card.volunteer .icon{background:#FBF0DD;}
+  .role-card b{display:block; font-size:16px; margin-bottom:2px;}
+  .role-card span{font-size:13px; color:var(--ink-soft);}
+
+  /* ---------- Контент ---------- */
+  main{flex:1; padding:16px 18px;}
+  .section-label{font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-soft); margin:20px 0 10px;}
+  .section-label:first-child{margin-top:0;}
+
+  /* Акцентный блок "активная заявка" (сверху экрана) */
+  .active-banner{background:var(--teal); color:#fff; border-radius:16px; padding:16px;
+    margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;}
+  .active-banner .label{font-size:12px; opacity:.8; margin-bottom:3px;}
+  .active-banner .addr{font-size:16px; font-weight:700; font-family:'Fraunces',serif;}
+  .active-banner .status-icn{width:44px; height:44px; border-radius:12px; background:rgba(255,255,255,.18);
+    display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0;}
+
+  /* Тикет-карточка (заявка) — иконка статуса вместо цветной полосы */
+  .ticket{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px;
+    margin-bottom:10px; display:flex; gap:12px; align-items:flex-start;}
+  .ticket .status-icon{width:36px; height:36px; border-radius:10px; display:flex; align-items:center;
+    justify-content:center; font-size:17px; flex-shrink:0;}
+  .ticket.status-open .status-icon{background:#FBF0DD;}
+  .ticket.status-accepted .status-icon{background:#E8F1EE;}
+  .ticket.status-done .status-icon{background:#EFF3ED;}
+  .ticket .ticket-body{flex:1; min-width:0;}
+  .ticket .top-row{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .ticket .addr{font-weight:600; font-size:15px; line-height:1.4;}
+  .ticket .addr .muted{color:var(--ink-soft); font-weight:400; font-size:13px;}
+  .badge{font-size:11px; font-weight:600; padding:4px 9px; border-radius:999px; white-space:nowrap;}
+  .badge.open{background:#FBF0DD; color:var(--amber-dark);}
+  .badge.accepted{background:#E8F1EE; color:var(--teal-dark);}
+  .badge.done{background:#EFF3ED; color:#5C7A63;}
+  .ticket .meta{margin-top:8px; font-size:13px; color:var(--ink-soft); display:flex; gap:14px; flex-wrap:wrap;}
+  .ticket .actions{margin-top:12px; display:flex; gap:8px;}
+
+  /* Кнопки */
+  .btn{border:none; border-radius:11px; padding:12px 16px; font-size:14px; font-weight:600; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:.12s;}
+  .btn:active{transform:scale(.97);}
+  .btn-primary{background:var(--teal); color:#fff; width:100%;}
+  .btn-secondary{background:var(--surface); color:var(--ink); border:1px solid var(--line);}
+  .btn-amber{background:var(--amber); color:#3A2A0C;}
+  .btn-full{width:100%;}
+  .btn:disabled{opacity:.45; cursor:default;}
+
+  /* Форма */
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:13px; color:var(--ink-soft); margin-bottom:6px; font-weight:500;}
+  .field input, .field textarea{width:100%; border:1px solid var(--line); border-radius:10px; padding:12px 13px;
+    font-size:15px; font-family:'Inter',sans-serif; background:var(--surface); color:var(--ink);}
+  .field-row{display:flex; gap:10px;}
+  .field-row .field{flex:1;}
+  .geo-status{font-size:13px; color:var(--ink-soft); display:flex; align-items:center; gap:6px; margin:10px 0 16px;}
+  .geo-dot{width:8px;height:8px;border-radius:50%;background:#C7C0AC;}
+  .geo-dot.ok{background:var(--teal);}
+
+  /* Карта */
+  #map{width:100%; height:260px; border-radius:14px; overflow:hidden; margin-bottom:14px; border:1px solid var(--line);}
+  .leaflet-routing-container{display:none;} /* прячем текстовые инструкции OSRM, оставляем линию */
+
+  /* Пустое состояние */
+  .empty{text-align:center; padding:40px 20px; color:var(--ink-soft);}
+  .empty .display{font-size:17px; color:var(--ink); margin-bottom:6px;}
+
+  /* Рейтинг */
+  .rank-row{display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line);}
+  .rank-row:last-child{border-bottom:none;}
+  .rank-num{width:26px; font-family:'Fraunces',serif; font-weight:700; color:var(--ink-soft); font-size:15px;}
+  .rank-row:nth-child(1) .rank-num{color:var(--amber-dark);}
+  .rank-name{flex:1; font-weight:600; font-size:14px;}
+  .rank-count{font-size:13px; color:var(--ink-soft);}
+
+  /* Нижняя навигация (волонтёр) */
+  nav.bottom{position:fixed; bottom:0; left:0; right:0; background:var(--surface); border-top:1px solid var(--line);
+    display:flex; max-width:480px; margin:0 auto; z-index:30;}
+  nav.bottom button{flex:1; border:none; background:none; padding:12px 4px 10px; font-family:'Inter',sans-serif;
+    font-size:11px; color:var(--ink-soft); display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer;}
+  nav.bottom button .ic{font-size:19px;}
+  nav.bottom button.active{color:var(--teal); font-weight:600;}
+
+  .hidden{display:none !important;}
+  .toast{position:fixed; bottom:96px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff;
+    padding:10px 18px; border-radius:999px; font-size:13px; z-index:50; opacity:0; transition:.25s; pointer-events:none;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ЭКРАН ПОДТВЕРЖДЕНИЯ НОМЕРА -->
+  <div id="roleScreen">
+    <div class="display">Подтвердите номер</div>
+    <p class="sub" id="verifySub">Нужно один раз поделиться номером — Telegram уже его проверил, дополнительный код не нужен</p>
+    <button class="btn btn-primary btn-full" id="verifyBtn" onclick="requestPhoneVerification()">📱 Поделиться номером</button>
+    <div id="verifyWaiting" class="hidden" style="margin-top:16px; color:var(--ink-soft); font-size:14px;">Ждём подтверждения от бота…</div>
+  </div>
+
+  <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+  <div id="mainScreen" class="hidden">
+    <header>
+      <div class="eyebrow">Пилот · волонтёрский вывоз</div>
+      <h1 id="headerTitle">Заявки</h1>
+      <div class="role-tag"><span id="roleLabel"></span></div>
+    </header>
+
+    <main>
+      <!-- ===== ВИД КЛИЕНТА ===== -->
+      <div id="clientView" class="hidden">
+        <div id="clientActiveBanner"></div>
+        <div class="section-label">Новая заявка</div>
+        <div class="field-row">
+          <div class="field"><label>Дом</label><input id="f_house" placeholder="12"></div>
+          <div class="field"><label>Подъезд</label><input id="f_entrance" placeholder="2"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Этаж</label><input id="f_floor" placeholder="5"></div>
+          <div class="field"><label>Квартира</label><input id="f_flat" placeholder="34"></div>
+        </div>
+        <div class="field"><label>Комментарий (необязательно)</label><textarea id="f_comment" rows="2" placeholder="Например: код домофона, время"></textarea></div>
+        <div class="geo-status"><span class="geo-dot" id="geoDot"></span><span id="geoText">Определяем ваше местоположение…</span></div>
+        <button class="btn btn-primary btn-full" id="submitOrderBtn" onclick="submitOrder()">Оставить заявку</button>
+
+        <div class="section-label">Мои заявки</div>
+        <div id="myOrdersList"></div>
+
+        <div style="margin-top:24px; text-align:center;">
+          <a href="#" id="volUpgradeLink" onclick="toggleVolCode(event)" style="font-size:13px; color:var(--ink-soft); text-decoration:underline;">Хочу быть волонтёром</a>
+          <div id="volCodeBox" class="hidden" style="margin-top:10px; display:flex; gap:8px;">
+            <input id="volCodeInput" placeholder="Код доступа" style="flex:1; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px;">
+            <button class="btn btn-secondary" onclick="submitVolCode()">ОК</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ВИД ВОЛОНТЁРА: КАРТА ===== -->
+      <div id="volMapView" class="hidden">
+        <div id="volActiveBanner"></div>
+        <div id="map"></div>
+        <div class="section-label">Открытые заявки рядом</div>
+        <div id="openOrdersList"></div>
+      </div>
+
+      <!-- ===== ВИД ВОЛОНТЁРА: МОИ ЗАЯВКИ ===== -->
+      <div id="volMyView" class="hidden">
+        <div class="section-label">Я забираю сейчас</div>
+        <div id="volActiveList"></div>
+        <div class="section-label">Выполненные мной</div>
+        <div id="volDoneList"></div>
+      </div>
+
+      <!-- ===== ВИД ВОЛОНТЁРА: РЕЙТИНГ ===== -->
+      <div id="volRankView" class="hidden">
+        <div class="section-label">Топ волонтёров</div>
+        <div id="rankList"></div>
+      </div>
+    </main>
+  </div>
+
+  <nav class="bottom hidden" id="volNav">
+    <button onclick="showVolTab('map')" data-tab="map"><span class="ic">🗺️</span>Карта</button>
+    <button onclick="showVolTab('my')" data-tab="my"><span class="ic">📦</span>Мои</button>
+    <button onclick="showVolTab('rank')" data-tab="rank"><span class="ic">🏆</span>Рейтинг</button>
+  </nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======================================================================
+   FIREBASE CONFIG
+   ====================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDgaPirVFDVLUCThA8Nrmqm-JYFQmGTWSQ",
+  authDomain: "qulay-bfc96.firebaseapp.com",
+  databaseURL: "https://qulay-bfc96-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "qulay-bfc96",
+  storageBucket: "qulay-bfc96.firebasestorage.app",
+  messagingSenderId: "889805486547",
+  appId: "1:889805486547:web:6197c53b0cc8f2dd441726",
+  measurementId: "G-DSSXNLB644"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ======================================================================
+   TELEGRAM WEBAPP INIT
+   ====================================================================== */
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+
+const tgUser = tg?.initDataUnsafe?.user;
+const userId = tgUser?.id ? String(tgUser.id) : "demo_" + Math.random().toString(36).slice(2,9);
+const userName = tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") : "Гость";
+
+let currentRole = null;
+let myPos = null;      // {lat,lng} волонтёра или клиента
+let map, volMarkersLayer, routingControl, myMarker;
+let ordersCache = {};
+
+/* ======================================================================
+   ВЕРИФИКАЦИЯ ПО НОМЕРУ (роль приходит от бота, не выбирается вручную)
+   ====================================================================== */
+let verifyPollTimer = null;
+
+function requestPhoneVerification(){
+  if(!tg?.requestContact){
+    toast("Откройте это приложение внутри Telegram");
+    return;
+  }
+  document.getElementById("verifyBtn").disabled = true;
+  document.getElementById("verifyWaiting").classList.remove("hidden");
+
+  tg.requestContact((shared)=>{
+    if(!shared){
+      document.getElementById("verifyBtn").disabled = false;
+      document.getElementById("verifyWaiting").classList.add("hidden");
+      toast("Нужно поделиться номером, чтобы продолжить");
+      return;
+    }
+    // Номер уходит боту как служебное сообщение — бот запишет его в Firebase.
+    // Мини-апп ждёт появления записи.
+    pollForVerification();
+  });
+}
+
+function pollForVerification(attempt){
+  attempt = attempt || 0;
+  db.ref("users/" + userId).once("value", snap=>{
+    const val = snap.val();
+    if(val && val.phone){
+      currentRole = val.role || "client";
+      enterApp();
+      return;
+    }
+    if(attempt > 20){ // ~30 секунд
+      document.getElementById("verifyWaiting").textContent = "Не получилось — откройте бота и отправьте /start ещё раз";
+      document.getElementById("verifyBtn").disabled = false;
+      return;
+    }
+    verifyPollTimer = setTimeout(()=>pollForVerification(attempt+1), 1500);
+  });
+}
+
+function checkExistingVerification(){
+  db.ref("users/" + userId).once("value", snap=>{
+    const val = snap.val();
+    if(val && val.phone){
+      currentRole = val.role || "client";
+      enterApp();
+    }
+  });
+}
+
+/* ======================================================================
+   АПГРЕЙД ДО ВОЛОНТЁРА ПО КОДУ (внутри того же приложения)
+   ====================================================================== */
+function toggleVolCode(e){
+  e.preventDefault();
+  document.getElementById("volCodeBox").classList.toggle("hidden");
+}
+function submitVolCode(){
+  const entered = document.getElementById("volCodeInput").value.trim();
+  if(!entered){ toast("Введите код"); return; }
+
+  db.ref("config/volunteerCode").once("value", snap=>{
+    const realCode = snap.val();
+    if(!realCode){ toast("Код ещё не настроен, спросите организатора"); return; }
+    if(entered === realCode){
+      db.ref("users/" + userId + "/role").set("volunteer");
+      toast("Готово! Вы теперь волонтёр ✓");
+      currentRole = "volunteer";
+      setTimeout(()=>enterApp(), 600);
+    } else {
+      toast("Неверный код");
+    }
+  });
+}
+
+function enterApp(){
+  document.getElementById("roleScreen").classList.add("hidden");
+  document.getElementById("mainScreen").classList.remove("hidden");
+  document.getElementById("roleLabel").textContent = currentRole === "client" ? "Клиент" : "Волонтёр";
+
+  if(currentRole === "client"){
+    document.getElementById("headerTitle").textContent = "Оставить заявку";
+    document.getElementById("clientView").classList.remove("hidden");
+    document.getElementById("volMapView").classList.add("hidden");
+    document.getElementById("volMyView").classList.add("hidden");
+    document.getElementById("volRankView").classList.add("hidden");
+    document.getElementById("volNav").classList.add("hidden");
+    initGeoForClient();
+    listenMyOrders();
+  } else {
+    document.getElementById("headerTitle").textContent = "Заявки рядом";
+    document.getElementById("clientView").classList.add("hidden");
+    document.getElementById("volNav").classList.remove("hidden");
+    showVolTab("map");
+    initGeoForVolunteer();
+    listenOpenOrders();
+    listenMyVolunteerOrders();
+    listenRanking();
+  }
+}
+
+/* ======================================================================
+   ГЕОЛОКАЦИЯ
+   ====================================================================== */
+function getGeo(cb){
+  if(!navigator.geolocation){ cb(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => cb({lat: pos.coords.latitude, lng: pos.coords.longitude}),
+    () => cb(null),
+    { enableHighAccuracy:true, timeout:8000 }
+  );
+}
+function initGeoForClient(){
+  getGeo(pos=>{
+    myPos = pos;
+    const dot = document.getElementById("geoDot");
+    const txt = document.getElementById("geoText");
+    if(pos){ dot.classList.add("ok"); txt.textContent = "Местоположение определено"; }
+    else { txt.textContent = "Не удалось определить — заявка будет без точки на карте"; }
+  });
+}
+function initGeoForVolunteer(){
+  getGeo(pos=>{ myPos = pos; if(map) placeMyMarker(); });
+}
+
+/* ======================================================================
+   КЛИЕНТ: СОЗДАНИЕ ЗАЯВКИ
+   ====================================================================== */
+function submitOrder(){
+  const house = document.getElementById("f_house").value.trim();
+  const entrance = document.getElementById("f_entrance").value.trim();
+  const floor = document.getElementById("f_floor").value.trim();
+  const flat = document.getElementById("f_flat").value.trim();
+  const comment = document.getElementById("f_comment").value.trim();
+
+  if(!house || !flat){ toast("Укажите хотя бы дом и квартиру"); return; }
+
+  const order = {
+    clientId: userId,
+    clientName: userName,
+    house, entrance, floor, flat, comment,
+    lat: myPos?.lat || null,
+    lng: myPos?.lng || null,
+    status: "open",
+    createdAt: Date.now(),
+    volunteerId: null,
+    volunteerName: null
+  };
+  db.ref("orders").push(order);
+  toast("Заявка создана ✓");
+  ["f_house","f_entrance","f_floor","f_flat","f_comment"].forEach(id=>document.getElementById(id).value="");
+}
+
+function listenMyOrders(){
+  db.ref("orders").orderByChild("clientId").equalTo(userId).on("value", snap=>{
+    const list = document.getElementById("myOrdersList");
+    const data = snap.val() || {};
+    const entries = Object.entries(data).sort((a,b)=>b[1].createdAt - a[1].createdAt);
+
+    const active = entries.find(([,o])=>o.status==="accepted");
+    document.getElementById("clientActiveBanner").innerHTML = active ? activeBannerHTML(active[1]) : "";
+
+    if(entries.length === 0){ list.innerHTML = emptyState("Пока нет заявок", "Заполните форму выше"); return; }
+    list.innerHTML = entries.map(([id,o])=>ticketHTML(id,o,"client")).join("");
+  });
+}
+function activeBannerHTML(o){
+  return `<div class="active-banner">
+    <div><div class="label">Волонтёр в пути</div>
+    <div class="addr">Дом ${o.house||"—"}, кв. ${o.flat||"—"}</div>
+    <div class="label" style="margin-top:4px">${o.volunteerName||"Волонтёр"}</div></div>
+    <div class="status-icn">🚶</div>
+  </div>`;
+}
+
+/* ======================================================================
+   ВОЛОНТЁР: ОТКРЫТЫЕ ЗАЯВКИ + КАРТА
+   ====================================================================== */
+function initMap(){
+  if(map) return;
+  map = L.map('map', { zoomControl:false }).setView([41.2995, 69.2401], 12); // Ташкент по умолчанию
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap', maxZoom:19
+  }).addTo(map);
+  volMarkersLayer = L.layerGroup().addTo(map);
+  if(myPos) placeMyMarker();
+}
+function placeMyMarker(){
+  if(!map || !myPos) return;
+  if(myMarker) map.removeLayer(myMarker);
+  myMarker = L.circleMarker([myPos.lat, myPos.lng], {
+    radius:8, color:"#1F6F5C", fillColor:"#1F6F5C", fillOpacity:1, weight:3
+  }).addTo(map).bindPopup("Вы здесь");
+  map.setView([myPos.lat, myPos.lng], 14);
+}
+function listenOpenOrders(){
+  db.ref("orders").orderByChild("status").equalTo("open").on("value", snap=>{
+    initMap();
+    const data = snap.val() || {};
+    ordersCache = {...ordersCache, ...data};
+    renderVolMarkers(data);
+    renderOpenOrdersList(data);
+  });
+}
+function renderVolMarkers(data){
+  volMarkersLayer.clearLayers();
+  Object.entries(data).forEach(([id,o])=>{
+    if(o.lat == null) return;
+    const m = L.marker([o.lat,o.lng]).addTo(volMarkersLayer);
+    m.bindPopup(`<b>Дом ${o.house}, кв. ${o.flat}</b><br><button onclick="claimOrder('${id}')" style="margin-top:6px;padding:6px 10px;border:none;background:#1F6F5C;color:#fff;border-radius:6px;">Принять</button>`);
+  });
+}
+function renderOpenOrdersList(data){
+  const list = document.getElementById("openOrdersList");
+  let entries = Object.entries(data);
+  if(myPos){
+    entries.forEach(([id,o])=>{ o._dist = (o.lat!=null) ? dist(myPos,{lat:o.lat,lng:o.lng}) : 999999; });
+    entries.sort((a,b)=>a[1]._dist - b[1]._dist);
+  }
+  if(entries.length===0){ list.innerHTML = emptyState("Открытых заявок нет","Загляните чуть позже"); return; }
+  list.innerHTML = entries.map(([id,o])=>ticketHTML(id,o,"volunteer_open")).join("");
+}
+function dist(a,b){
+  const R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  const x = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+
+/* ======================================================================
+   ПРИНЯТЬ ЗАЯВКУ — атомарная транзакция, защита от гонки
+   ====================================================================== */
+function claimOrder(orderId){
+  const ref = db.ref("orders/" + orderId);
+  ref.transaction(order=>{
+    if(order && order.status === "open"){
+      order.status = "accepted";
+      order.volunteerId = userId;
+      order.volunteerName = userName;
+      order.acceptedAt = Date.now();
+      return order;
+    }
+    return order; // не трогаем, если уже занято
+  }, (err, committed, snap)=>{
+    if(err){ toast("Ошибка, попробуйте ещё раз"); return; }
+    const result = snap.val();
+    if(result && result.volunteerId === userId){
+      toast("Заявка ваша ✓");
+      showVolTab("my");
+      setTimeout(()=>drawRoute(result),300);
+    } else {
+      toast("Кто-то опередил вас");
+    }
+  });
+}
+
+function drawRoute(order){
+  if(!map || !myPos || order.lat==null) return;
+  if(routingControl){ map.removeControl(routingControl); routingControl=null; }
+  routingControl = L.Routing.control({
+    waypoints:[L.latLng(myPos.lat,myPos.lng), L.latLng(order.lat,order.lng)],
+    lineOptions:{ styles:[{color:'#1F6F5C', weight:5, opacity:.8}] },
+    createMarker:()=>null, addWaypoints:false, draggableWaypoints:false,
+    fitSelectedRoutes:true, show:false
+  }).addTo(map);
+  showVolTab("map");
+}
+function openExternalMaps(lat,lng){
+  const isIOS = /iPhone|iPad/.test(navigator.userAgent);
+  const url = isIOS
+    ? `https://maps.apple.com/?daddr=${lat},${lng}`
+    : `https://yandex.ru/maps/?rtext=~${lat},${lng}&rtt=pd`;
+  tg?.openLink ? tg.openLink(url) : window.open(url,"_blank");
+}
+
+/* ======================================================================
+   ВОЛОНТЁР: МОИ ЗАЯВКИ (принятые/выполненные)
+   ====================================================================== */
+function listenMyVolunteerOrders(){
+  db.ref("orders").orderByChild("volunteerId").equalTo(userId).on("value", snap=>{
+    const data = snap.val() || {};
+    const active = Object.entries(data).filter(([,o])=>o.status==="accepted");
+    const done = Object.entries(data).filter(([,o])=>o.status==="done");
+    document.getElementById("volActiveList").innerHTML =
+      active.length ? active.map(([id,o])=>ticketHTML(id,o,"volunteer_active")).join("") : emptyState("Нет активных заявок","Возьмите одну на карте");
+    document.getElementById("volDoneList").innerHTML =
+      done.length ? done.map(([id,o])=>ticketHTML(id,o,"volunteer_done")).join("") : emptyState("Пока пусто","Здесь появятся выполненные заявки");
+
+    const bannerBox = document.getElementById("volActiveBanner");
+    if(bannerBox){
+      bannerBox.innerHTML = active.length ? `<div class="active-banner">
+        <div><div class="label">Вы выполняете</div>
+        <div class="addr">Дом ${active[0][1].house||"—"}, кв. ${active[0][1].flat||"—"}</div></div>
+        <div class="status-icn">📦</div>
+      </div>` : "";
+    }
+  });
+}
+function markDone(orderId){
+  db.ref("orders/"+orderId).update({ status:"done", doneAt: Date.now() });
+  db.ref("users/"+userId+"/completedCount").transaction(c=>(c||0)+1);
+  toast("Отмечено как выполнено ✓");
+}
+
+/* ======================================================================
+   РЕЙТИНГ
+   ====================================================================== */
+function listenRanking(){
+  db.ref("users").orderByChild("completedCount").on("value", snap=>{
+    const data = snap.val() || {};
+    const entries = Object.entries(data)
+      .filter(([,u])=>u.role==="volunteer")
+      .sort((a,b)=>(b[1].completedCount||0)-(a[1].completedCount||0))
+      .slice(0,20);
+    const list = document.getElementById("rankList");
+    if(entries.length===0){ list.innerHTML = emptyState("Рейтинг пуст","Станьте первым волонтёром"); return; }
+    list.innerHTML = entries.map(([id,u],i)=>`
+      <div class="rank-row">
+        <div class="rank-num">${i+1}</div>
+        <div class="rank-name">${u.name || "Волонтёр"}</div>
+        <div class="rank-count">${u.completedCount||0} заявок</div>
+      </div>`).join("");
+  });
+}
+
+/* ======================================================================
+   UI ХЕЛПЕРЫ
+   ====================================================================== */
+function ticketHTML(id, o, context){
+  const statusMap = {
+    open:["Ищем волонтёра","open","🕒"],
+    accepted:["Принята: "+ (o.volunteerName||""),"accepted","🚶"],
+    done:["Выполнено","done","✅"]
+  };
+  const [label, cls, icon] = statusMap[o.status] || ["—","open","🕒"];
+  let actions = "";
+  if(context === "volunteer_open"){
+    const distTxt = (o._dist!=null && o._dist<9999) ? `<span class="muted"> · ${o._dist.toFixed(1)} км</span>` : "";
+    actions = `<div class="actions"><button class="btn btn-primary btn-full" onclick="claimOrder('${id}')">Принять заявку</button></div>`;
+    return `
+      <div class="ticket status-${cls}">
+        <div class="status-icon">${icon}</div>
+        <div class="ticket-body">
+          <div class="top-row">
+            <div class="addr">Дом ${o.house||"—"}, кв. ${o.flat||"—"}${distTxt}</div>
+          </div>
+          ${o.comment ? `<div class="meta">💬 ${o.comment}</div>` : ""}
+          ${actions}
+        </div>
+      </div>`;
+  } else if(context === "volunteer_active"){
+    actions = `<div class="actions">
+      <button class="btn btn-secondary" onclick="drawRoute(${JSON.stringify(o).replace(/"/g,'&quot;')})">Маршрут</button>
+      ${o.lat!=null?`<button class="btn btn-secondary" onclick="openExternalMaps(${o.lat},${o.lng})">Во внешней карте</button>`:""}
+      <button class="btn btn-amber" onclick="markDone('${id}')">Выполнено</button>
+    </div>`;
+  }
+  return `
+    <div class="ticket status-${cls}">
+      <div class="status-icon">${icon}</div>
+      <div class="ticket-body">
+        <div class="top-row">
+          <div class="addr">Дом ${o.house||"—"}, кв. ${o.flat||"—"}<br><span class="muted">Подъезд ${o.entrance||"—"}, этаж ${o.floor||"—"}</span></div>
+          <span class="badge ${cls}">${label}</span>
+        </div>
+        ${o.comment ? `<div class="meta">💬 ${o.comment}</div>` : ""}
+        ${actions}
+      </div>
+    </div>`;
+}
+function emptyState(title, sub){
+  return `<div class="empty"><div class="display">${title}</div><div>${sub}</div></div>`;
+}
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2200);
+}
+function showVolTab(tab){
+  ["map","my","rank"].forEach(t=>{
+    document.getElementById("vol"+cap(t)+"View").classList.toggle("hidden", t!==tab);
+  });
+  document.querySelectorAll("nav.bottom button").forEach(b=>b.classList.toggle("active", b.dataset.tab===tab));
+  if(tab==="map" && map){ setTimeout(()=>map.invalidateSize(),200); }
+}
+function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+
+/* ======================================================================
+   СТАРТ
+   ====================================================================== */
+checkExistingVerification();
+</script>
+</body>
+</html>
