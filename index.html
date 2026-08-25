@@ -270,7 +270,7 @@ const tgFullName = tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean
 let me=null;
 try{ me=JSON.parse(localStorage.getItem('qulay_profile')||'null'); }catch(e){ me=null; }
 let MYNAME = me?me.name:'Гость';
-let regName=tgFullName||'', regPhone='', regCode='';
+let regName=tgFullName||'', regPhone='', regCode='', regHouse='', regDistrict='';
 
 function phoneDigits(v){let d=(v||'').replace(/\D/g,'');
   if(d.startsWith('998'))d=d.slice(3);return d.slice(0,9);}
@@ -288,6 +288,16 @@ let db=null, connOK=false;
 let view='home', mode='now', dayI=0, timeV='14:00', bags='Один пакет', rating=0;
 let addr=JSON.parse(localStorage.getItem('qulay_addr')||'null')||{h:'',e:'',f:'',q:'',note:''};
 let orders={}, myOrder=null, activeJob=null, onair=true, photoURL=null;
+let finOrder=null, ratingComment='', leaderboard={};
+const LEVELS=[[0,'Новичок'],[100,'Активный волонтёр'],[300,'Опытный волонтёр'],[600,'Герой квартала']];
+function levelName(pts){ let n=LEVELS[0][1]; for(const[t,l]of LEVELS){ if(pts>=t) n=l; } return n; }
+function computeRank(role,scopeKey,scopeVal){
+  if(!scopeVal) return null;
+  const rows=Object.entries(leaderboard).filter(([,r])=>r&&r.role===role&&r[scopeKey]===scopeVal)
+    .sort((a,b)=> role==='volunteer' ? ((b[1].points||0)-(a[1].points||0)) : ((b[1].ordersCompleted||0)-(a[1].ordersCompleted||0)));
+  const idx=rows.findIndex(([id])=>id===uid);
+  return idx===-1?null:idx+1;
+}
 let geoCoords=null, geoStatus='idle'; /* idle | asking | ok | denied | unsupported */
 let seenIds=new Set(), alertOrder=null, audioCtx=null, alertTimer=null;
 
@@ -382,6 +392,7 @@ function boot(){
           else { db.ref('users/'+uid+'/onair').set(onair).catch(()=>{}); } /* первый вход: пишем значение по умолчанию, иначе бот не увидит волонтёра */
         }).catch(()=>{});
       }
+      db.ref('leaderboard').on('value',s=>{ leaderboard=s.val()||{}; if(view==='home') render(); });
       listen();
       render();
     }
@@ -393,7 +404,8 @@ function boot(){
       const v=s.val();
       if(v&&v.phone){
         ROLE = v.role==='volunteer' ? 'vo':'cl';
-        me={name:v.name||'',phone:v.phone,role:ROLE,createdAt:v.createdAt||Date.now()};
+        me={name:v.name||'',phone:v.phone,role:ROLE,createdAt:v.createdAt||Date.now(),
+            house:v.house||'', district:v.district||''};
         MYNAME=me.name||MYNAME;
         localStorage.setItem('qulay_profile',JSON.stringify(me));
       }
@@ -498,7 +510,8 @@ function askNotify(){
 /* ================= регистрация ================= */
 function regView(){
   const isVo=ROLE==='vo';
-  const ok=phoneDigits(regPhone).length===9 && regName.trim().length>=2 && (!isVo || regCode.trim().length>=4);
+  const placeOk = isVo ? regDistrict.trim().length>=1 : regHouse.trim().length>=1;
+  const ok=phoneDigits(regPhone).length===9 && regName.trim().length>=2 && placeOk && (!isVo || regCode.trim().length>=4);
   return `<header><div class="brand"><div class="n">Qulay${isVo?' · волонтёр':''}</div></div>
       <h1 class="hi">${isVo?'Регистрация волонтёра':'Добро пожаловать'}<br>
       <span>${isVo?'Жильцы будут видеть ваше имя':'Займёт полминуты'}</span></h1></header>
@@ -520,6 +533,13 @@ function regView(){
       <div class="f"><label>Номер телефона</label>
         <input id="r_phone" type="tel" inputmode="tel" value="${regPhone||'+998 '}"
           oninput="onPhone(this)" placeholder="+998 90 123 45 67"></div>
+      ${isVo
+        ?`<div class="f"><label>Район / махалля</label>
+           <input id="r_district" value="${regDistrict}" placeholder="Чиланзар-9"
+             oninput="regDistrict=this.value;liveCheck()"></div>`
+        :`<div class="f"><label>Дом</label>
+           <input id="r_house" value="${regHouse}" placeholder="12"
+             oninput="regHouse=this.value;liveCheck()"></div>`}
       ${isVo?`<div class="f"><label>Код приглашения</label>
         <input id="r_code" value="${regCode}" placeholder="выдал организатор"
           oninput="regCode=this.value.toUpperCase();liveCheck()"></div>
@@ -540,21 +560,36 @@ function onPhone(inp){
 }
 function liveCheck(){
   const b=$('#r_btn'); if(!b) return;
-  const baseOk=phoneDigits(regPhone).length===9 && regName.trim().length>=2;
+  const isVo=ROLE==='vo';
+  const placeOk = isVo ? regDistrict.trim().length>=1 : regHouse.trim().length>=1;
+  const baseOk=phoneDigits(regPhone).length===9 && regName.trim().length>=2 && placeOk;
   b.disabled=!(baseOk && (ROLE!=='vo' || regCode.trim().length>=4));
 }
-function finishRegistration(name,phone,fbRole){
-  me={name,phone,role:ROLE,createdAt:Date.now()};
+function finishRegistration(name,phone,fbRole,place){
+  const house = fbRole==='volunteer' ? '' : place;
+  const district = fbRole==='volunteer' ? place : '';
+  me={name,phone,role:ROLE,createdAt:Date.now(),house,district};
   MYNAME=name;
   localStorage.setItem('qulay_profile',JSON.stringify(me));
-  if(db) db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt}).catch(()=>{});
+  if(db){
+    db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt,
+      house:house||null, district:district||null}).catch(()=>{});
+    db.ref('leaderboard/'+uid).transaction(cur=>{
+      cur=cur||{points:0,ordersCompleted:0,ratingSum:0,ratingCount:0};
+      cur.name=name; cur.role=fbRole; cur.house=house||null; cur.district=district||null;
+      return cur;
+    });
+  }
   view='home';render();
   toast('Готово, '+name+'!');
 }
 function saveProfile(){
   const name=regName.trim(), phone=fmtPhone(regPhone);
+  const isVo=ROLE==='vo';
+  const place=(isVo?regDistrict:regHouse).trim();
   if(name.length<2||phoneDigits(phone).length!==9){toast('Проверьте имя и номер');return;}
-  if(ROLE!=='vo'){ finishRegistration(name,phone,'client'); return; }
+  if(!place){toast(isVo?'Укажите район':'Укажите дом');return;}
+  if(!isVo){ finishRegistration(name,phone,'client',place); return; }
   const code=regCode.trim().toUpperCase();
   if(!code){toast('Введите код приглашения');return;}
   if(!db){toast('Нет связи с сервером, попробуйте ещё раз');return;}
@@ -569,11 +604,12 @@ function saveProfile(){
       toast('Код неверный или уже использован');
       return;
     }
-    finishRegistration(name,phone,'volunteer');
+    finishRegistration(name,phone,'volunteer',place);
   });
 }
 function editProfile(){
   regName=me?me.name:''; regPhone=me?me.phone:'';
+  regHouse=me?(me.house||''):''; regDistrict=me?(me.district||''):'';
   view='reg';render();
 }
 
@@ -607,7 +643,10 @@ function cHome(){
         <div class="b"><div class="n mono">${done.length}</div><div class="c">раз вынесли<br>за вас</div></div>
         <div class="b"><div class="n mono">${done.length*3}<small style="font-size:12px"> кг</small></div>
           <div class="c">не осталось<br>у подъезда</div></div>
-        <div class="b"><div class="n mono">#1</div><div class="c">место<br>в вашем доме</div></div></div>
+        <div class="b"><div class="n mono">${(()=>{const r=computeRank('client','house',me.house);return r?('#'+r):'—';})()}</div>
+          <div class="c">место<br>в вашем доме</div></div></div>
+      ${!me.house?`<p class="hint">Укажите дом в профиле, чтобы участвовать в рейтинге дома.
+        <a href="#" onclick="editProfile();return false">Изменить</a></p>`:''}
       <div class="lbl">История</div>
       ${done.length? done.slice(0,5).map(o=>`<div class="card"><div class="job">
           <div class="pin" style="background:#E4F6EE;color:var(--grn)">✓</div>
@@ -684,13 +723,18 @@ function cLive(){
 }
 
 function cFin(){
+  const already = finOrder && finOrder.ratingOfVolunteer;
   return `<main><div class="fin"><div class="em">🎉</div>
       <h2>Мусор забран</h2><p>Волонтёр донёс пакет до контейнера. Вам не пришлось выходить.</p>
+      ${already?'':`
       <div class="lbl" style="text-align:center">Как справился волонтёр</div>
       <div class="stars">${[1,2,3,4,5].map(i=>`<button class="${rating>=i?'on':''}"
-        onclick="rate(${i})">⭐</button>`).join('')}</div></div>
-      <div class="bar"><button class="btn dark" onclick="go('home')">${
-        rating?'Отправить и закрыть':'Готово'}</button></div></main>`;
+        onclick="rate(${i})">⭐</button>`).join('')}</div>
+      ${rating?`<div class="f"><label>Почему такая оценка (необязательно)</label>
+        <textarea oninput="ratingComment=this.value" placeholder="Что понравилось или что можно лучше">${ratingComment}</textarea></div>`:''}`}
+      </div>
+      <div class="bar"><button class="btn dark" onclick="finishRating('volunteer')">${
+        rating&&!already?'Отправить и закрыть':'Готово'}</button></div></main>`;
 }
 
 /* ---------------- ВОЛОНТЁР ---------------- */
@@ -718,8 +762,12 @@ function vHome(){
       <div class="lbl">Ваши результаты</div>
       <div class="imp">
         <div class="b"><div class="n mono">${done.length}</div><div class="c">заявок<br>закрыто</div></div>
-        <div class="b"><div class="n mono">${done.length*20}</div><div class="c">очков<br>набрано</div></div>
-        <div class="b"><div class="n mono">#1</div><div class="c">место<br>в районе</div></div></div>
+        <div class="b"><div class="n mono">${(leaderboard[uid]&&leaderboard[uid].points)||0}</div><div class="c">очков<br>набрано</div></div>
+        <div class="b"><div class="n mono">${(()=>{const r=computeRank('volunteer','district',me.district);return r?('#'+r):'—';})()}</div>
+          <div class="c">место<br>в районе</div></div></div>
+      <div class="lbl" style="margin-top:2px">${levelName((leaderboard[uid]&&leaderboard[uid].points)||0)}</div>
+      ${!me.district?`<p class="hint">Укажите район в профиле, чтобы участвовать в рейтинге.
+        <a href="#" onclick="editProfile();return false">Изменить</a></p>`:''}
       <div class="lbl">Заявки рядом</div>
       ${list.length? list.map(o=>`<div class="card"><div class="job">
           <div class="pin">📍</div>
@@ -790,9 +838,18 @@ function vWork(){
 }
 
 function vFin(){
+  const already = finOrder && finOrder.ratingOfResident;
   return `<main><div class="fin"><div class="em">🌱</div>
-      <h2>Заявка закрыта</h2><p>Пакет доехал до контейнера, а не остался у подъезда.</p></div>
-      <div class="bar"><button class="btn dark" onclick="go('home')">Вернуться к заявкам</button></div></main>`;
+      <h2>Заявка закрыта</h2><p>Пакет доехал до контейнера, а не остался у подъезда.</p>
+      ${already?'':`
+      <div class="lbl" style="text-align:center">Как вам жилец</div>
+      <div class="stars">${[1,2,3,4,5].map(i=>`<button class="${rating>=i?'on':''}"
+        onclick="rate(${i})">⭐</button>`).join('')}</div>
+      ${rating?`<div class="f"><label>Почему такая оценка (необязательно)</label>
+        <textarea oninput="ratingComment=this.value" placeholder="Комментарий">${ratingComment}</textarea></div>`:''}`}
+      </div>
+      <div class="bar"><button class="btn dark" onclick="finishRating('resident')">${
+        rating&&!already?'Отправить и закрыть':'Вернуться к заявкам'}</button></div></main>`;
 }
 
 function ago(ts){
@@ -803,13 +860,30 @@ function ago(ts){
 }
 
 /* ================= действия ================= */
-function go(v){view=v;rating=0;render();window.scrollTo({top:0,behavior:'smooth'});
+function go(v){view=v;rating=0;ratingComment='';render();window.scrollTo({top:0,behavior:'smooth'});
   if(v==='new'&&geoStatus==='idle') requestGeo();}
 function setMode(m){mode=m;render();}
 function pickDay(i){dayI=i;const t=times(i);if(!t.includes(timeV))timeV=t[0];render();}
 function pickTime(t){timeV=t;render();}
 function pickBags(b){bags=b;render();}
 function rate(n){rating=n;render();}
+function finishRating(kind){
+  if(rating && finOrder && db){
+    const field = kind==='volunteer' ? 'ratingOfVolunteer' : 'ratingOfResident';
+    const targetUid = kind==='volunteer' ? finOrder.volunteerId : finOrder.clientId;
+    const payload = {stars:rating, comment:(ratingComment||'').trim().slice(0,300), at:Date.now()};
+    db.ref('orders/'+finOrder.id+'/'+field).set(payload).catch(()=>{});
+    if(targetUid){
+      db.ref('leaderboard/'+targetUid).transaction(cur=>{
+        if(cur===null) return; /* записи ещё нет — появится сама на следующей закрытой заявке, оценку не считаем */
+        cur.ratingSum=(cur.ratingSum||0)+rating;
+        cur.ratingCount=(cur.ratingCount||0)+1;
+        return cur;
+      });
+    }
+  }
+  rating=0; ratingComment=''; finOrder=null; view='home'; render();
+}
 function maps(){const o=activeJob;
   window.open('https://yandex.uz/maps/?text='+encodeURIComponent(A(o)),'_blank');}
 
@@ -853,7 +927,7 @@ function setStatus(s){
   if(!activeJob) return;
   const upd={status:s}; if(s==='done'){upd.doneAt=Date.now();upd.photo=!!photoURL;}
   db.ref('orders/'+activeJob.id).update(upd).then(()=>{
-    if(s==='done'){activeJob=null;photoURL=null;view='fin';render();}
+    if(s==='done'){ finOrder={...activeJob,...upd}; activeJob=null;photoURL=null;view='fin';render(); }
   }).catch(()=>toast('Не удалось обновить статус'));
 }
 function snap(inp){
@@ -872,9 +946,9 @@ function toggleAir(){
 let lastPhase=-1;
 setInterval(()=>{
   if(ROLE!=='cl') return;
-  const done=Object.values(orders).some(o=>o.clientId===uid&&o.status==='done'&&
+  const doneEntry=Object.entries(orders).find(([,o])=>o.clientId===uid&&o.status==='done'&&
     Date.now()-(o.doneAt||0)<12000);
-  if(done&&view==='live'){view='fin';render();}
+  if(doneEntry&&view==='live'){ finOrder={id:doneEntry[0],...doneEntry[1]}; view='fin';render(); }
 },1500);
 
 boot();
