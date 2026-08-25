@@ -270,7 +270,7 @@ const tgFullName = tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean
 let me=null;
 try{ me=JSON.parse(localStorage.getItem('qulay_profile')||'null'); }catch(e){ me=null; }
 let MYNAME = me?me.name:'Гость';
-let regName=tgFullName||'', regPhone='';
+let regName=tgFullName||'', regPhone='', regCode='';
 
 function phoneDigits(v){let d=(v||'').replace(/\D/g,'');
   if(d.startsWith('998'))d=d.slice(3);return d.slice(0,9);}
@@ -373,6 +373,20 @@ function boot(){
     if(ROLE==='vo'){
       db.ref('users/'+uid+'/onair').once('value').then(s=>{
         if(s.exists()){ onair=!!s.val(); render(); }
+        else { db.ref('users/'+uid+'/onair').set(onair).catch(()=>{}); } /* первый вход: пишем значение по умолчанию, иначе бот не увидит волонтёра */
+      }).catch(()=>{});
+    }
+    if(!me||!me.phone){
+      /* профиль мог быть создан через бота (номер телефона) — подтягиваем его,
+         чтобы не просить регистрироваться и код приглашения повторно */
+      db.ref('users/'+uid).once('value').then(s=>{
+        const v=s.val();
+        if(v&&v.phone){
+          me={name:v.name||'',phone:v.phone,role:(v.role==='volunteer'?'vo':'cl'),createdAt:v.createdAt||Date.now()};
+          MYNAME=me.name||MYNAME;
+          localStorage.setItem('qulay_profile',JSON.stringify(me));
+          render();
+        }
       }).catch(()=>{});
     }
     listen();
@@ -475,8 +489,8 @@ function askNotify(){
 
 /* ================= регистрация ================= */
 function regView(){
-  const ok=phoneDigits(regPhone).length===9 && regName.trim().length>=2;
   const isVo=ROLE==='vo';
+  const ok=phoneDigits(regPhone).length===9 && regName.trim().length>=2 && (!isVo || regCode.trim().length>=4);
   return `<header><div class="brand"><div class="n">Qulay${isVo?' · волонтёр':''}</div></div>
       <h1 class="hi">${isVo?'Регистрация волонтёра':'Добро пожаловать'}<br>
       <span>${isVo?'Жильцы будут видеть ваше имя':'Займёт полминуты'}</span></h1></header>
@@ -498,7 +512,11 @@ function regView(){
       <div class="f"><label>Номер телефона</label>
         <input id="r_phone" type="tel" inputmode="tel" value="${regPhone||'+998 '}"
           oninput="onPhone(this)" placeholder="+998 90 123 45 67"></div>
-      <p class="hint">Номер сохраняется только для связи по заявке.</p>
+      ${isVo?`<div class="f"><label>Код приглашения</label>
+        <input id="r_code" value="${regCode}" placeholder="выдал организатор"
+          oninput="regCode=this.value.toUpperCase();liveCheck()"></div>
+      <p class="hint">Код одноразовый, его даёт руководитель волонтёров.</p>`
+      :`<p class="hint">Номер сохраняется только для связи по заявке.</p>`}
 
       <div class="bar"><button class="btn ${isVo?'grn':'acc'}" id="r_btn" ${ok?'':'disabled'}
         onclick="saveProfile()">Продолжить</button></div>
@@ -514,18 +532,37 @@ function onPhone(inp){
 }
 function liveCheck(){
   const b=$('#r_btn'); if(!b) return;
-  b.disabled=!(phoneDigits(regPhone).length===9 && regName.trim().length>=2);
+  const baseOk=phoneDigits(regPhone).length===9 && regName.trim().length>=2;
+  b.disabled=!(baseOk && (ROLE!=='vo' || regCode.trim().length>=4));
 }
-function saveProfile(){
-  const name=regName.trim(), phone=fmtPhone(regPhone);
-  if(name.length<2||phoneDigits(phone).length!==9){toast('Проверьте имя и номер');return;}
-  const fbRole = ROLE==='vo' ? 'volunteer' : 'client'; /* бот ждёт полное слово, не 'cl'/'vo' */
+function finishRegistration(name,phone,fbRole){
   me={name,phone,role:ROLE,createdAt:Date.now()};
   MYNAME=name;
   localStorage.setItem('qulay_profile',JSON.stringify(me));
   if(db) db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt}).catch(()=>{});
   view='home';render();
   toast('Готово, '+name+'!');
+}
+function saveProfile(){
+  const name=regName.trim(), phone=fmtPhone(regPhone);
+  if(name.length<2||phoneDigits(phone).length!==9){toast('Проверьте имя и номер');return;}
+  if(ROLE!=='vo'){ finishRegistration(name,phone,'client'); return; }
+  const code=regCode.trim().toUpperCase();
+  if(!code){toast('Введите код приглашения');return;}
+  if(!db){toast('Нет связи с сервером, попробуйте ещё раз');return;}
+  const btn=$('#r_btn'); if(btn) btn.disabled=true;
+  db.ref('inviteCodes/'+code).transaction(function(cur){
+    if(cur===null || cur.used) return; /* код не найден или уже использован — прервать транзакцию */
+    cur.used=true; cur.usedBy=uid; cur.usedByName=name; cur.usedAt=Date.now();
+    return cur;
+  }, function(err, committed){
+    if(err || !committed){
+      if(btn) btn.disabled=false;
+      toast('Код неверный или уже использован');
+      return;
+    }
+    finishRegistration(name,phone,'volunteer');
+  });
 }
 function editProfile(){
   regName=me?me.name:''; regPhone=me?me.phone:'';
