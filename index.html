@@ -366,9 +366,11 @@ function boot(){
   try{
     firebase.initializeApp(CFG);
     db=firebase.database();
+    let everConnected=false;
     db.ref('.info/connected').on('value',s=>{
-      if(s.val()===true){ if(!connOK) conn(true,'Связь есть — заявки приходят мгновенно'); }
-      else conn(false,'Нет связи с сервером. Проверьте интернет');
+      if(s.val()===true){ everConnected=true; if(!connOK) conn(true,'Связь есть — заявки приходят мгновенно'); }
+      else if(everConnected){ conn(false,'Нет связи с сервером. Проверьте интернет'); }
+      /* иначе это самое первое подключение при загрузке — не пугаем баннером, просто ждём */
     });
     if(ROLE==='vo'){
       db.ref('users/'+uid+'/onair').once('value').then(s=>{
