@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Qulay</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <style>
@@ -251,17 +252,25 @@ const CFG={
   appId:"1:889805486547:web:6197c53b0cc8f2dd441726"
 };
 
+const TG = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if(TG){ TG.ready(); TG.expand(); }
+const tgUser = TG && TG.initDataUnsafe && TG.initDataUnsafe.user ? TG.initDataUnsafe.user : null;
+const startParam = (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '';
 const P=new URLSearchParams(location.search);
-const ROLE=(P.get('role')==='volunteer')?'vo':'cl';
+const roleParam = P.get('role') || startParam; /* поддержка и ?role=, и deep-link startapp= */
+const ROLE=(roleParam==='volunteer'||roleParam==='vol')?'vo':'cl';
 
-let uid=localStorage.getItem('qulay_uid');
+/* Настоящий Telegram ID, если открыто внутри Telegram.
+   Случайный ID — только запасной вариант для теста в обычном браузере. */
+let uid = tgUser ? String(tgUser.id) : localStorage.getItem('qulay_uid');
 if(!uid){uid='u'+Math.random().toString(36).slice(2,10);localStorage.setItem('qulay_uid',uid);}
+const tgFullName = tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') : '';
 
 /* профиль: имя + телефон, сохраняется на устройстве и в базе */
 let me=null;
 try{ me=JSON.parse(localStorage.getItem('qulay_profile')||'null'); }catch(e){ me=null; }
 let MYNAME = me?me.name:'Гость';
-let regName='', regPhone='';
+let regName=tgFullName||'', regPhone='';
 
 function phoneDigits(v){let d=(v||'').replace(/\D/g,'');
   if(d.startsWith('998'))d=d.slice(3);return d.slice(0,9);}
@@ -279,6 +288,7 @@ let db=null, connOK=false;
 let view='home', mode='now', dayI=0, timeV='14:00', bags='Один пакет', rating=0;
 let addr=JSON.parse(localStorage.getItem('qulay_addr')||'null')||{h:'',e:'',f:'',q:'',note:''};
 let orders={}, myOrder=null, activeJob=null, onair=true, photoURL=null;
+let geoCoords=null, geoStatus='idle'; /* idle | asking | ok | denied | unsupported */
 let seenIds=new Set(), alertOrder=null, audioCtx=null, alertTimer=null;
 
 const days=[{d:'сегодня'},{d:'завтра'},{d:'послезавтра'}];
@@ -309,6 +319,47 @@ function times(i){const a=[];const st=i===0?Math.min(21,new Date().getHours()+1)
   return a.length?a:['08:00'];}
 function whenLabel(){return mode==='now'?'сейчас':`${days[dayI].d} в ${timeV}`;}
 
+/* ================= геопозиция ================= */
+function requestGeo(){
+  if(!navigator.geolocation){ geoStatus='unsupported'; render(); return; }
+  geoStatus='asking'; render();
+  navigator.geolocation.getCurrentPosition(
+    pos=>{ geoCoords={lat:pos.coords.latitude,lng:pos.coords.longitude}; geoStatus='ok'; render(); },
+    ()=>{ geoStatus='denied'; render(); },
+    {enableHighAccuracy:true, timeout:8000, maximumAge:60000}
+  );
+}
+function geoCard(){
+  if(geoStatus==='ok'){
+    return `<div class="card" style="border-color:#CFEBDF;background:#F5FCF9"><div class="job">
+      <div class="pin" style="background:#E4F6EE;color:var(--grn)">📍</div>
+      <div class="b"><div class="a">Геопозиция найдена</div>
+      <div class="m">Волонтёр увидит точку на карте и построит маршрут прямо к вам</div></div></div></div>`;
+  }
+  if(geoStatus==='asking'){
+    return `<div class="card"><div class="job">
+      <div class="pin">📍</div>
+      <div class="b"><div class="a">Определяем местоположение…</div>
+      <div class="m">Разрешите доступ, если браузер спросит</div></div></div></div>`;
+  }
+  if(geoStatus==='denied'){
+    return `<div class="card" style="border-color:#F6D9C9;background:#FFFBF4"><div class="job">
+      <div class="pin" style="background:#FDF0E0;color:var(--amb)">⚠️</div>
+      <div class="b"><div class="a">Нет доступа к геопозиции</div>
+      <div class="m">Без неё волонтёру будет сложнее вас найти. Заявку всё равно можно отправить</div>
+      </div></div><button class="take" onclick="requestGeo()">Разрешить ещё раз</button></div>`;
+  }
+  if(geoStatus==='unsupported'){
+    return `<div class="card"><div class="job"><div class="pin">⚠️</div>
+      <div class="b"><div class="a">Браузер не поддерживает геопозицию</div>
+      <div class="m">Заявка всё равно будет принята</div></div></div></div>`;
+  }
+  return `<div class="card"><div class="job"><div class="pin">📍</div>
+    <div class="b"><div class="a">Определить местоположение</div>
+    <div class="m">Поможет волонтёру найти вас быстрее</div></div></div>
+    <button class="take" onclick="requestGeo()">Определить</button></div>`;
+}
+
 /* ================= подключение ================= */
 function boot(){
   document.getElementById('app').className=ROLE;
@@ -319,6 +370,11 @@ function boot(){
       if(s.val()===true){ if(!connOK) conn(true,'Связь есть — заявки приходят мгновенно'); }
       else conn(false,'Нет связи с сервером. Проверьте интернет');
     });
+    if(ROLE==='vo'){
+      db.ref('users/'+uid+'/onair').once('value').then(s=>{
+        if(s.exists()){ onair=!!s.val(); render(); }
+      }).catch(()=>{});
+    }
     listen();
   }catch(e){ conn(false,'Не удалось подключиться к серверу'); }
   render();
@@ -463,10 +519,11 @@ function liveCheck(){
 function saveProfile(){
   const name=regName.trim(), phone=fmtPhone(regPhone);
   if(name.length<2||phoneDigits(phone).length!==9){toast('Проверьте имя и номер');return;}
+  const fbRole = ROLE==='vo' ? 'volunteer' : 'client'; /* бот ждёт полное слово, не 'cl'/'vo' */
   me={name,phone,role:ROLE,createdAt:Date.now()};
   MYNAME=name;
   localStorage.setItem('qulay_profile',JSON.stringify(me));
-  if(db) db.ref('users/'+uid).update(me).catch(()=>{});
+  if(db) db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt}).catch(()=>{});
   view='home';render();
   toast('Готово, '+name+'!');
 }
@@ -544,6 +601,8 @@ function cNew(){
         <div class="f"><label>Квартира</label><input id="i_q" value="${addr.q}" placeholder="34"></div></div>
       <div class="f"><label>Комментарий</label>
         <textarea id="i_n" placeholder="Код домофона, лифт не работает">${addr.note||''}</textarea></div>
+      <div class="lbl">Геопозиция</div>
+      ${geoCard()}
       <div class="lbl">Что выносим</div>
       <div class="tags">${['Один пакет','Два-три пакета','Крупный мусор','Стекло / банки']
         .map(c=>`<button class="tag" style="cursor:pointer;font-size:12.5px;padding:9px 13px;
@@ -699,7 +758,8 @@ function ago(ts){
 }
 
 /* ================= действия ================= */
-function go(v){view=v;rating=0;render();window.scrollTo({top:0,behavior:'smooth'});}
+function go(v){view=v;rating=0;render();window.scrollTo({top:0,behavior:'smooth'});
+  if(v==='new'&&geoStatus==='idle') requestGeo();}
 function setMode(m){mode=m;render();}
 function pickDay(i){dayI=i;const t=times(i);if(!t.includes(timeV))timeV=t[0];render();}
 function pickTime(t){timeV=t;render();}
@@ -717,8 +777,12 @@ function submit(){
   const ref=db.ref('orders').push();
   ref.set({clientId:uid,clientName:MYNAME,clientPhone:me.phone,
     house:addr.h,entrance:addr.e,floor:addr.f,flat:addr.q,
-    note:addr.note,bags,when:mode==='now'?'now':whenLabel(),status:'open',createdAt:Date.now()})
-    .then(()=>{view='live';render();toast('Заявка отправлена волонтёрам');})
+    note:addr.note,bags,when:mode==='now'?'now':whenLabel(),status:'open',createdAt:Date.now(),
+    lat:geoCoords?geoCoords.lat:null,lng:geoCoords?geoCoords.lng:null})
+    .then(()=>{view='live';
+      geoCoords=null;geoStatus='idle';
+      render();
+      toast('Заявка отправлена волонтёрам');})
     .catch(()=>toast('Не удалось отправить. Проверьте правила Firebase'));
 }
 function cancelOrder(){
@@ -755,6 +819,7 @@ function snap(inp){
 }
 function toggleAir(){
   onair=!onair; if(onair){beep();askNotify();} render();
+  if(db) db.ref('users/'+uid+'/onair').set(onair).catch(()=>{});
   toast(onair?'Уведомления включены':'Уведомления выключены');
 }
 
