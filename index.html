@@ -258,7 +258,7 @@ const tgUser = TG && TG.initDataUnsafe && TG.initDataUnsafe.user ? TG.initDataUn
 const startParam = (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '';
 const P=new URLSearchParams(location.search);
 const roleParam = P.get('role') || startParam; /* поддержка и ?role=, и deep-link startapp= */
-const ROLE=(roleParam==='volunteer'||roleParam==='vol')?'vo':'cl';
+let ROLE=(roleParam==='volunteer'||roleParam==='vol')?'vo':'cl';
 
 /* Настоящий Telegram ID, если открыто внутри Telegram.
    Случайный ID — только запасной вариант для теста в обычном браузере. */
@@ -372,28 +372,34 @@ function boot(){
       else if(everConnected){ conn(false,'Нет связи с сервером. Проверьте интернет'); }
       /* иначе это самое первое подключение при загрузке — не пугаем баннером, просто ждём */
     });
-    if(ROLE==='vo'){
-      db.ref('users/'+uid+'/onair').once('value').then(s=>{
-        if(s.exists()){ onair=!!s.val(); render(); }
-        else { db.ref('users/'+uid+'/onair').set(onair).catch(()=>{}); } /* первый вход: пишем значение по умолчанию, иначе бот не увидит волонтёра */
-      }).catch(()=>{});
+    render(); /* мгновенная первая отрисовка по тому, что уже знаем локально, не дожидаясь ответа базы */
+
+    function startAsRole(){
+      document.getElementById('app').className=ROLE;
+      if(ROLE==='vo'){
+        db.ref('users/'+uid+'/onair').once('value').then(s=>{
+          if(s.exists()){ onair=!!s.val(); render(); }
+          else { db.ref('users/'+uid+'/onair').set(onair).catch(()=>{}); } /* первый вход: пишем значение по умолчанию, иначе бот не увидит волонтёра */
+        }).catch(()=>{});
+      }
+      listen();
+      render();
     }
-    if(!me||!me.phone){
-      /* профиль мог быть создан через бота (номер телефона) — подтягиваем его,
-         чтобы не просить регистрироваться и код приглашения повторно */
-      db.ref('users/'+uid).once('value').then(s=>{
-        const v=s.val();
-        if(v&&v.phone){
-          me={name:v.name||'',phone:v.phone,role:(v.role==='volunteer'?'vo':'cl'),createdAt:v.createdAt||Date.now()};
-          MYNAME=me.name||MYNAME;
-          localStorage.setItem('qulay_profile',JSON.stringify(me));
-          render();
-        }
-      }).catch(()=>{});
-    }
-    listen();
-  }catch(e){ conn(false,'Не удалось подключиться к серверу'); }
-  render();
+
+    /* роль в базе — источник правды: ссылка/кнопка, которой открыли приложение,
+       может быть без ?role= (например постоянная кнопка меню бота), а роль уже
+       выданная при регистрации теряться не должна */
+    db.ref('users/'+uid).once('value').then(s=>{
+      const v=s.val();
+      if(v&&v.phone){
+        ROLE = v.role==='volunteer' ? 'vo':'cl';
+        me={name:v.name||'',phone:v.phone,role:ROLE,createdAt:v.createdAt||Date.now()};
+        MYNAME=me.name||MYNAME;
+        localStorage.setItem('qulay_profile',JSON.stringify(me));
+      }
+      startAsRole();
+    }).catch(()=>{ startAsRole(); });
+  }catch(e){ conn(false,'Не удалось подключиться к серверу'); render(); }
 }
 
 function listen(){
