@@ -363,7 +363,7 @@ const S={
   orders:{}, board:{}, onair:true, photoURL:null,
   myOrder:null, activeJob:null, finOrder:null, alertOrder:null,
   rating:0, comment:'', reasons:[],
-  noVol:false, seen:new Set(), primed:false,
+  noVol:false, waitUntil:0, seen:new Set(), primed:false,
   set:JSON.parse(localStorage.getItem('qulay_set')||'null')||
       {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',lang:'ru'},
 };
@@ -551,6 +551,15 @@ function myAvg(){const b=myBoard();
 function vStats(){const b=myBoard();
   return {done:b.ordersCompleted||myJobs().filter(o=>o.status==='done').length,
           pts:b.points||0, avg:myAvg()}}
+/* Заявка, которую этот человек закрыл, но ещё не оценил. Раньше окно для
+   оценки жило 20 секунд после закрытия: стоило свернуть телефон — и оценить
+   было уже нельзя, то есть рейтинг почти не собирался бы. */
+function pendingRating(){
+  const list = ROLE==='cl' ? myOrders() : myJobs();
+  const field = ROLE==='cl' ? 'ratingOfVolunteer' : 'ratingOfResident';
+  return list.find(o=>o.status==='done' && !o[field]
+    && Date.now()-(o.doneAt||o.createdAt||0) < 7*86400000) || null;
+}
 function rankIn(role,key,val){
   if(!val) return null;
   const rows=Object.entries(S.board).filter(([,r])=>r&&r.role===role&&r[key]===val)
@@ -759,6 +768,7 @@ function cHome(){
           <span class="k">Забрать сегодня</span><span class="t">Вынести мусор</span>
           <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
           <span class="go">→</span></button>`}
+    ${rateCard()}
     <div class="q-stats">
       <div class="q-st"><div class="n">${done.length}</div><div class="c">раз вынесли за вас</div></div>
       <div class="q-st"><div class="n">${done.length*3}<small>кг</small></div>
@@ -907,6 +917,7 @@ function vHome(){
       <div style="flex:1"><div class="t">${S.onair?'Вы на связи':'Уведомления выключены'}</div>
         <div class="b">${S.onair?'Пришлём звук, когда появится заявка':'Включите, чтобы не пропустить'}</div></div>
       ${sw(S.onair,'toggleAir()')}</div>
+    ${rateCard()}
     ${S.activeJob?`<div class="q-card" style="border:2px solid var(--g)">
       <div class="q-row"><div class="q-ic">🚶</div>
         <div style="flex:1"><div class="a">Активная заявка</div>
@@ -1131,13 +1142,14 @@ function listen(){
     if(ROLE==='cl'){
       const mine=myOrders();
       const live=mine.find(o=>o.status!=='done'&&o.status!=='cancelled');
-      const justDone=mine.find(o=>o.status==='done'&&Date.now()-(o.doneAt||0)<20000);
       S.myOrder=live||null;
       if(S.myOrder && S.view==='new') S.view='live';
       if(!S.myOrder && S.view==='live'){
-        if(justDone){ S.finOrder=justDone; S.view='fin' } else S.view='home';
+        const pr=pendingRating();
+        if(pr){ S.finOrder=pr; S.view='fin' } else S.view='home';
       }
-      if(S.myOrder&&S.myOrder.status==='open') armWait(S.myOrder); else { clearTimeout(waitT); S.noVol=false }
+      if(S.myOrder&&S.myOrder.status==='open') armWait(S.myOrder);
+      else { clearTimeout(waitT); S.noVol=false; S.waitUntil=0 }
     }else{
       const act=myJobs().find(o=>o.status!=='done'&&o.status!=='cancelled');
       const prev=S.activeJob;
@@ -1154,15 +1166,22 @@ function listen(){
     render();
   },()=>{ conn('Нет доступа к базе — проверьте правила Firebase'); S.ready=true; render() });
 }
+/* Момент, после которого показываем «никто не откликнулся», держим отдельно:
+   раньше он пересчитывался от времени создания заявки при каждом обновлении
+   базы, поэтому «Подождать ещё» тут же отменялось следующим же снимком. */
 function armWait(o){
   clearTimeout(waitT);
-  const age=Date.now()-(o.createdAt||Date.now());
-  const left=Math.max(0, 120000-age);
-  if(left===0){ S.noVol=true; return }
+  if(!S.waitUntil) S.waitUntil=(o.createdAt||Date.now())+120000;
+  const left=S.waitUntil-Date.now();
+  if(left<=0){ S.noVol=true; return }
+  S.noVol=false;
   waitT=setTimeout(()=>{ if(S.myOrder&&S.myOrder.status==='open'){ S.noVol=true; render() } },left);
 }
-function keepWaiting(){ S.noVol=false; render(); toast('Ищем дальше');
-  if(S.myOrder) { clearTimeout(waitT); waitT=setTimeout(()=>{ S.noVol=true; render() },120000) } }
+function keepWaiting(){
+  S.waitUntil=Date.now()+120000; S.noVol=false;
+  if(S.myOrder) armWait(S.myOrder);
+  render(); toast('Ищем дальше');
+}
 
 /* уведомление волонтёру о новой заявке */
 function checkNew(){
@@ -1219,13 +1238,30 @@ function setLang(l){S.set.lang=l;saveSet();render();
 function tgl(k){S.set[k]=!S.set[k];saveSet();render();toast(S.set[k]?'Включено':'Выключено')}
 function tglReason(r){const i=S.reasons.indexOf(r); if(i<0)S.reasons.push(r); else S.reasons.splice(i,1); render()}
 function rate(n){S.rating=n; if(n>3)S.reasons=[]; render()}
+function openRating(id){
+  const o=S.orders[id]; if(!o) return;
+  S.finOrder={id,...o}; S.rating=0; S.comment=''; S.reasons=[];
+  S.view='fin'; render();
+}
+function rateCard(){
+  const pr=pendingRating(); if(!pr) return '';
+  const who = ROLE==='cl' ? (pr.volunteerName||'волонтёра') : (pr.clientName||'жителя');
+  return `<div class="q-card" style="border:2px solid var(--sun)">
+    <div class="q-row"><div class="q-ic sun">⭐</div>
+      <div style="flex:1"><div class="a">Оцените ${esc(who)}</div>
+      <div class="b">${esc(A(pr))} · ${when(pr.doneAt||pr.createdAt)}</div></div></div>
+    <button class="q-btn sm" style="margin-top:12px"
+      onclick="openRating('${pr.id}')">Поставить оценку</button></div>`;
+}
 function invite(){
   if(ROLE==='vo'){ toast('Попросите у организатора код приглашения для друга'); return }
-  const link='https://t.me/'+(P.get('bot')||'qulay_bot');
+  const bot=P.get('bot')||startParam.replace(/^bot=/,'');
+  if(!bot){ toast('Отправьте соседям ссылку на бота Qulay'); return }
+  const link='https://t.me/'+bot;
   try{ if(TG&&TG.openTelegramLink){ TG.openTelegramLink('https://t.me/share/url?url='+
     encodeURIComponent(link)+'&text='+encodeURIComponent('Qulay — соседи-волонтёры выносят мусор. Бесплатно.'));
     return } }catch(e){}
-  toast('Отправьте соседям ссылку на бота Qulay');
+  toast('Ссылка: '+link);
 }
 function maps(){ const o=S.activeJob; if(!o) return;
   const q=encodeURIComponent(`Дом ${o.house}, подъезд ${o.entrance||''}`);
@@ -1285,6 +1321,9 @@ function saveEdits(){
   S.view='home'; render(); toast('Сохранено');
 }
 function submit(){
+  // вторая одновременная заявка делала первую невидимой для жителя,
+  // но она продолжала висеть у волонтёров
+  if(S.myOrder){ toast('У вас уже есть активная заявка'); S.view='live'; render(); return }
   const h=($('#i_h').value||'').trim(), q=($('#i_q').value||'').trim();
   if(!h||!q){ toast('Укажите дом и квартиру'); return }
   S.addr={h,e:($('#i_e').value||'').trim(),f:($('#i_f').value||'').trim(),q,
