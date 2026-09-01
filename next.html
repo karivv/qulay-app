@@ -361,7 +361,7 @@ const S={
   orders:{}, board:{}, onair:true, photoURL:null,
   myOrder:null, activeJob:null, finOrder:null, alertOrder:null,
   rating:0, comment:'', reasons:[],
-  noVol:false, seen:new Set(),
+  noVol:false, seen:new Set(), primed:false,
   set:JSON.parse(localStorage.getItem('qulay_set')||'null')||
       {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',lang:'ru'},
 };
@@ -1039,7 +1039,9 @@ function loadProfile(attempt){
   db.ref('users/'+uid).once('value').then(s=>{
     const v=s.val();
     if(v&&v.phone){
-      lockRole(v.role);                       // роль из базы — источник правды
+      // роль из базы — источник правды, но только если она там вообще есть:
+      // пустое поле не должно молча понизить волонтёра до жителя
+      if(v.role) lockRole(v.role);
       me={name:v.name||'',phone:v.phone,role:ROLE,house:v.house||'',district:v.district||'',
           createdAt:v.createdAt||Date.now(),addr:me&&me.addr?me.addr:S.addr};
       localStorage.setItem('qulay_profile',JSON.stringify(me));
@@ -1107,8 +1109,12 @@ function keepWaiting(){ S.noVol=false; render(); toast('Ищем дальше');
 
 /* уведомление волонтёру о новой заявке */
 function checkNew(){
-  if(!S.onair||S.activeJob) return;
   const list=openOrders();
+  // первый снимок из базы — это всё, что уже висело до открытия приложения.
+  // Помечаем как виденное и молчим, иначе волонтёр при каждом входе получает
+  // звонок о заявке недельной давности.
+  if(!S.primed){ list.forEach(o=>S.seen.add(o.id)); S.primed=true; return }
+  if(!me||!me.phone||!S.onair||S.activeJob){ list.forEach(o=>S.seen.add(o.id)); return }
   const fresh=list.filter(o=>!S.seen.has(o.id));
   list.forEach(o=>S.seen.add(o.id));
   if(fresh.length) fireAlert(fresh[0]);
