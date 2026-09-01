@@ -364,6 +364,7 @@ const S={
   myOrder:null, activeJob:null, finOrder:null, alertOrder:null,
   rating:0, comment:'', reasons:[],
   noVol:false, waitUntil:0, seen:new Set(), primed:false,
+  geo:null, geoState:'idle',   /* idle | asking | ok | denied | unsupported */
   set:JSON.parse(localStorage.getItem('qulay_set')||'null')||
       {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',lang:'ru'},
 };
@@ -372,6 +373,17 @@ if(me&&me.addr) S.addr=me.addr;
 const BAGS=['Один пакет','Два-три пакета','Крупный мусор','Стекло / банки'];
 const TIMES=['14:00','16:00','18:00','20:00'];
 const RADII=['500 м','1 км','3 км'];
+const RADIUS_M={'500 м':500,'1 км':1000,'3 км':3000};
+const DAY_LIMIT=3;
+/* расстояние по прямой между двумя точками, метры */
+function distM(a,b){
+  if(!a||!b||a.lat==null||b.lat==null) return null;
+  const R=6371000, t=x=>x*Math.PI/180;
+  const dLat=t(b.lat-a.lat), dLng=t(b.lng-a.lng);
+  const s=Math.sin(dLat/2)**2+Math.cos(t(a.lat))*Math.cos(t(b.lat))*Math.sin(dLng/2)**2;
+  return Math.round(2*R*Math.asin(Math.sqrt(s)));
+}
+const distLabel=m=>m==null?null:(m<950?Math.round(m/10)*10+' м':(m/1000).toFixed(1).replace('.',',')+' км');
 const REASONS_C=['Долго ждал(а)','Не пришёл','Был невежлив','Мусор не забрал','Другое'];
 const REASONS_V=['Долго не открывали','Мусор не тот','Был невежлив','Адрес не совпал','Другое'];
 const ST=['open','taken','arrived','picked','done'];
@@ -701,7 +713,9 @@ function settingsView(){
     ${isVo?`<div class="q-lbl">Как далеко готовы идти</div>
       <div class="q-chips">${RADII.map(r=>
         `<button class="q-chip" aria-pressed="${S.set.radius===r}" onclick="setRadius('${r}')">${r}</button>`).join('')}</div>
-      <p class="q-help">Пока подсказка для вас: расстояние в заявках считается от вашего района.</p>`:''}
+      <p class="q-help">Заявки дальше этого расстояния показываем приглушённо. Расстояние
+        считается по прямой от вашей геопозиции до дома жителя — работает, только если
+        вы оба разрешили доступ к местоположению.</p>`:''}
     <div class="q-lbl">Язык</div>
     <div class="q-seg">
       <button aria-pressed="${S.set.lang==='ru'}" onclick="setLang('ru')">Русский</button>
@@ -806,6 +820,8 @@ function cNew(){
       <div class="q-f"><label>Квартира</label><input id="i_q" value="${esc(S.addr.q)}" placeholder="34"></div></div>
     <div class="q-f"><label>Комментарий</label>
       <textarea id="i_n" placeholder="Код домофона, лифт не работает">${esc(S.addr.note)}</textarea></div>
+    <div class="q-lbl">Геопозиция</div>
+    ${geoCard()}
     <div class="q-lbl">Что выносим</div>
     <div class="q-chips">${BAGS.map(b=>
       `<button class="q-chip" aria-pressed="${S.bags===b}" onclick="setBags('${b}')">${b}</button>`).join('')}</div>
@@ -863,7 +879,9 @@ function cHist(){
         <div style="text-align:right">
           <div style="font-size:13px;color:var(--sun)">${o.ratingOfVolunteer?st5(o.ratingOfVolunteer.stars):'—'}</div>
           <div class="b" style="font-size:11px">${esc(o.bags||'')}</div></div></div>
-      <button class="q-btn sm ghost" style="margin-top:12px" onclick="go('new')">Повторить заявку</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="q-btn sm ghost" onclick="go('new')">Повторить</button>
+        ${o.photo?`<button class="q-btn sm ghost" onclick="showPhoto('${o.id}')">Фото</button>`:''}</div>
     </div>`).join('')
     :`<div class="q-empty"><div class="e">📦</div><div class="t">Пока пусто</div>
       <div class="b">Здесь появятся все ваши заявки</div></div>`}
@@ -906,7 +924,9 @@ function cFin(){
 
 /* ================= экраны волонтёра ================= */
 function vHome(){
-  const list=openOrders(), v=vStats();
+  let list=openOrders(); const v=vStats();
+  // когда знаем, где волонтёр, ближние заявки идут первыми
+  if(S.geo) list=list.slice().sort((a,b)=>((distM(S.geo,a)??1e9)-(distM(S.geo,b)??1e9)));
   const r=rankIn('volunteer','district',me.district);
   return wrap(`<div class="pad">
     <div class="q-top">${logo('волонтёр')}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
@@ -934,14 +954,18 @@ function vHome(){
       <div class="q-st"><div class="n">${r?'#'+r.pos:'—'}</div><div class="c">место в районе</div></div></div>
     ${!me.district?`<p class="q-help">Укажите район в профиле, чтобы участвовать в рейтинге.</p>`:''}
     <div class="q-lbl">Заявки рядом</div>
-    ${list.length?list.map(o=>`<div class="q-card">
+    ${S.geoState!=='ok'?geoCard():''}
+    ${list.length?list.map(o=>{
+      const m=distM(S.geo,o), far=m!=null&&m>RADIUS_M[S.set.radius];
+      return `<div class="q-card"${far?' style="opacity:.55"':''}>
       <div class="q-row"><div class="q-ic sun">📍</div>
         <div style="flex:1"><div class="a">${esc(A(o))}</div>
-        <div class="b">${esc(M(o))} · ${esc(o.bags||'')} · ${when(o.createdAt)}</div></div></div>
+        <div class="b">${esc(M(o))} · ${esc(o.bags||'')} · ${when(o.createdAt)}</div>
+        ${m!=null?`<div class="b">${distLabel(m)} от вас${far?' · дальше вашего радиуса':''}</div>`:''}</div></div>
       ${o.note?`<div class="b" style="font-size:12.5px;color:var(--soft);margin-top:11px">💬 ${esc(o.note)}</div>`:''}
       <button class="q-btn" style="margin-top:13px" ${S.activeJob?'disabled':''}
         onclick="claim('${o.id}')">${S.activeJob?'Сначала закройте текущую':'Взять заявку'}</button>
-    </div>`).join('')
+    </div>`}).join('')
     :`<div class="q-empty"><div class="e">🌿</div><div class="t">Сейчас всё чисто</div>
       <div class="b">Как только житель оставит заявку, она появится здесь</div></div>`}
   </div>`,'home');
@@ -1131,6 +1155,13 @@ function start(){
       else db.ref('users/'+uid+'/onair').set(true).catch(()=>{});
       render();
     }).catch(()=>{});
+    // последняя известная позиция — чтобы расстояния были сразу, без повторного запроса
+    db.ref('users/'+uid+'/geo').once('value').then(s=>{
+      const g=s.val();
+      if(g&&g.lat!=null&&Date.now()-(g.at||0)<6*3600000){
+        S.geo={lat:g.lat,lng:g.lng}; S.geoState='ok'; render();
+      }
+    }).catch(()=>{});
   }
   db.ref('leaderboard').on('value',s=>{ S.board=s.val()||{}; render() },()=>{});
   listen();
@@ -1238,6 +1269,19 @@ function setLang(l){S.set.lang=l;saveSet();render();
 function tgl(k){S.set[k]=!S.set[k];saveSet();render();toast(S.set[k]?'Включено':'Выключено')}
 function tglReason(r){const i=S.reasons.indexOf(r); if(i<0)S.reasons.push(r); else S.reasons.splice(i,1); render()}
 function rate(n){S.rating=n; if(n>3)S.reasons=[]; render()}
+function showPhoto(id){
+  if(!db){ toast('Нет связи с сервером'); return }
+  toast('Загружаем фото…');
+  db.ref('orderPhotos/'+id).once('value').then(s=>{
+    const p=s.val();
+    if(!p||!p.img){ toast('Фото не сохранилось для этой заявки'); return }
+    const w=window.open();
+    if(w){ w.document.write('<title>Фото у контейнера</title>'+
+      '<body style="margin:0;background:#0F1815;display:grid;place-items:center;min-height:100vh">'+
+      '<img src="'+p.img+'" style="max-width:100%">'); w.document.close() }
+    else toast('Разрешите открытие окна, чтобы увидеть фото');
+  }).catch(()=>toast('Не удалось загрузить фото'));
+}
 function openRating(id){
   const o=S.orders[id]; if(!o) return;
   S.finOrder={id,...o}; S.rating=0; S.comment=''; S.reasons=[];
@@ -1262,6 +1306,36 @@ function invite(){
     encodeURIComponent(link)+'&text='+encodeURIComponent('Qulay — соседи-волонтёры выносят мусор. Бесплатно.'));
     return } }catch(e){}
   toast('Ссылка: '+link);
+}
+function askGeo(){
+  if(!navigator.geolocation){ S.geoState='unsupported'; render(); return }
+  S.geoState='asking'; render();
+  navigator.geolocation.getCurrentPosition(
+    p=>{ S.geo={lat:p.coords.latitude,lng:p.coords.longitude}; S.geoState='ok';
+         // волонтёру координаты нужны, чтобы считать расстояние до заявок
+         if(ROLE==='vo'&&db) db.ref('users/'+uid+'/geo').set({...S.geo,at:Date.now()}).catch(()=>{});
+         render(); toast('Местоположение определено') },
+    ()=>{ S.geoState='denied'; render(); toast('Без геопозиции расстояние показать не сможем') },
+    {enableHighAccuracy:true,timeout:9000,maximumAge:120000}
+  );
+}
+function geoCard(){
+  if(S.geoState==='ok') return `<div class="q-card flat"><div class="q-row">
+    <div class="q-ic sm">📍</div><div><div class="a" style="font-size:14px">Геопозиция есть</div>
+    <div class="b">Волонтёр увидит, насколько вы близко</div></div></div></div>`;
+  if(S.geoState==='asking') return `<div class="q-card flat"><div class="q-row">
+    <div class="q-ic sm">📍</div><div><div class="a" style="font-size:14px">Определяем…</div>
+    <div class="b">Разрешите доступ, если телефон спросит</div></div></div></div>`;
+  const denied=S.geoState==='denied'||S.geoState==='unsupported';
+  return `<div class="q-card flat"><div class="q-row">
+    <div class="q-ic sm ${denied?'sun':''}">📍</div>
+    <div style="flex:1"><div class="a" style="font-size:14px">${denied
+      ? 'Геопозиция недоступна':'Добавить геопозицию'}</div>
+    <div class="b">${denied
+      ? 'Заявку всё равно можно отправить — волонтёр найдёт по адресу'
+      : 'Волонтёры увидят расстояние и быстрее возьмут заявку'}</div></div></div>
+    <button class="q-btn sm ghost" style="margin-top:12px" onclick="askGeo()">
+      ${denied?'Попробовать ещё раз':'Определить'}</button></div>`;
 }
 function maps(){ const o=S.activeJob; if(!o) return;
   const q=encodeURIComponent(`Дом ${o.house}, подъезд ${o.entrance||''}`);
@@ -1324,6 +1398,11 @@ function submit(){
   // вторая одновременная заявка делала первую невидимой для жителя,
   // но она продолжала висеть у волонтёров
   if(S.myOrder){ toast('У вас уже есть активная заявка'); S.view='live'; render(); return }
+  // мягкий предохранитель на время пилота: волонтёров мало, и один человек
+  // не должен занимать их весь день
+  const since=Date.now()-86400000;
+  const today=myOrders().filter(o=>(o.createdAt||0)>since&&o.status!=='cancelled').length;
+  if(today>=DAY_LIMIT){ toast(`Не больше ${DAY_LIMIT} заявок в сутки`); return }
   const h=($('#i_h').value||'').trim(), q=($('#i_q').value||'').trim();
   if(!h||!q){ toast('Укажите дом и квартиру'); return }
   S.addr={h,e:($('#i_e').value||'').trim(),f:($('#i_f').value||'').trim(),q,
@@ -1334,7 +1413,8 @@ function submit(){
     clientId:uid, clientName:me.name, clientPhone:me.phone,
     house:S.addr.h, entrance:S.addr.e, floor:S.addr.f, flat:S.addr.q,
     note:S.addr.note, bags:S.bags, when:S.mode==='now'?'сейчас':('сегодня в '+S.timeV),
-    status:'open', createdAt:Date.now()
+    status:'open', createdAt:Date.now(),
+    lat:S.geo?S.geo.lat:null, lng:S.geo?S.geo.lng:null
   }).then(()=>{ S.noVol=false; S.view='live'; render(); toast('Заявка отправлена волонтёрам') })
    .catch(()=>toast('Не удалось отправить заявку'));
 }
@@ -1365,8 +1445,15 @@ function setStatus(s){
   if(s==='picked') upd.pickedAt=Date.now();
   if(s==='done'){ upd.doneAt=Date.now(); upd.photo=!!S.photoURL }
   db.ref('orders/'+o.id).update(upd).then(()=>{
-    if(s==='done'){ S.finOrder={...o,...upd}; S.activeJob=null; S.photoURL=null;
-      S.view='fin'; render() }
+    if(s==='done'){
+      // сам снимок кладём отдельно от заявки: список заявок читают все,
+      // и таскать вместе с ним десятки фотографий нельзя
+      if(S.photoURL) db.ref('orderPhotos/'+o.id).set({
+        img:S.photoURL, at:Date.now(), by:uid
+      }).catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
+      S.finOrder={...o,...upd}; S.activeJob=null; S.photoURL=null;
+      S.view='fin'; render();
+    }
   }).catch(()=>toast('Не удалось обновить статус'));
 }
 function giveUp(){
@@ -1390,13 +1477,13 @@ function snap(inp){
   const url=URL.createObjectURL(f);
   const img=new Image();
   img.onload=()=>{
-    const MAX=1000; let w=img.width,h=img.height;
+    const MAX=800; let w=img.width,h=img.height;
     if(w>=h && w>MAX){ h=Math.round(h*MAX/w); w=MAX }
     else if(h>w && h>MAX){ w=Math.round(w*MAX/h); h=MAX }
     try{
       const c=document.createElement('canvas'); c.width=w; c.height=h;
       c.getContext('2d').drawImage(img,0,0,w,h);
-      S.photoURL=c.toDataURL('image/jpeg',0.7);
+      S.photoURL=c.toDataURL('image/jpeg',0.6);
     }catch(e){ S.photoURL=null }
     URL.revokeObjectURL(url);
     if(S.photoURL){ render(); toast('Фото прикреплено') }
