@@ -36,7 +36,7 @@
   --shl:0 16px 32px -16px rgba(0,0,0,.8);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;height:100%}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
 body{background:var(--bg);color:var(--ink);font-family:"Rubik",ui-sans-serif,system-ui,
   -apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
 button{font-family:inherit;cursor:pointer}
@@ -44,8 +44,10 @@ input,textarea{font-family:inherit}
 :focus-visible{outline:2.5px solid var(--g);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-#app{max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;
-  display:flex;flex-direction:column;position:relative}
+/* высоту задаём из JS по окну Telegram: 100vh внутри Mini App врёт,
+   из-за чего нижняя панель уезжала под край экрана */
+#app{max-width:480px;margin:0 auto;height:100%;
+  display:flex;flex-direction:column;position:relative;overflow:hidden}
 .scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
 .pad{padding:14px 18px 22px;display:flex;flex-direction:column;gap:14px;flex:1}
 .push{margin-top:auto}
@@ -401,6 +403,13 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const A=o=>`Дом ${o&&o.house||'—'}, кв. ${o&&o.flat||'—'}`;
 const M=o=>`Подъезд ${o&&o.entrance||'—'}, этаж ${o&&o.floor||'—'}`;
 const st5=n=>'★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n);
+function plural(n,one,few,many){
+  const a=Math.abs(n)%100, b=a%10;
+  if(a>10&&a<20) return many;
+  if(b===1) return one;
+  if(b>=2&&b<=4) return few;
+  return many;
+}
 const MYNAME=()=>me&&me.name?me.name:(tgName||'Гость');
 function phoneDigits(v){let d=(v||'').replace(/\D/g,'');if(d.startsWith('998'))d=d.slice(3);return d.slice(0,9)}
 function fmtPhone(v){const d=phoneDigits(v);let o='+998';
@@ -426,12 +435,31 @@ function isDark(){
 }
 try{ mq.addEventListener('change',()=>{ if(S.set.theme==='auto') render() }) }catch(e){}
 try{ if(TG) TG.onEvent('themeChanged',()=>{ if(S.set.theme==='auto') render() }) }catch(e){}
+function fitViewport(){
+  const el=document.getElementById('app'); if(!el) return;
+  let h=0;
+  try{ h=(TG&&(TG.viewportStableHeight||TG.viewportHeight))||0 }catch(e){}
+  if(!h) h=window.innerHeight;
+  el.style.height=h+'px';
+}
+try{ if(TG) TG.onEvent('viewportChanged',fitViewport) }catch(e){}
+window.addEventListener('resize',fitViewport);
+
+let chromeApplied=null;
 function applyChrome(){
   const d=isDark();
   document.body.classList.toggle('dark',d);
   document.body.classList.toggle('big',!!S.set.big);
-  try{ if(TG&&TG.setBackgroundColor) TG.setBackgroundColor(d?'#0F1815':'#F1F7F2');
-       if(TG&&TG.setHeaderColor) TG.setHeaderColor(d?'#0F1815':'#F1F7F2'); }catch(e){}
+  // Красить фон Telegram можно только когда цвет действительно поменялся:
+  // setBackgroundColor сам порождает событие themeChanged, а на него мы
+  // перерисовываемся — если звать его на каждый рендер, приложение уходит
+  // в бесконечный цикл и телефон встаёт колом.
+  const key=d?'dark':'light';
+  if(chromeApplied===key) return;
+  chromeApplied=key;
+  const c=d?'#0F1815':'#F1F7F2';
+  try{ if(TG&&TG.setBackgroundColor) TG.setBackgroundColor(c);
+       if(TG&&TG.setHeaderColor) TG.setHeaderColor(c); }catch(e){}
 }
 function saveSet(){ localStorage.setItem('qulay_set',JSON.stringify(S.set)) }
 
@@ -448,6 +476,10 @@ function ring(pts){
   </svg><div class="mid">🌿</div></div>`;
 }
 const ROUTE=[[46,158],[46,128],[46,100],[86,100],[126,100],[126,74],[126,50],[156,50],[186,50]];
+/* положение волонтёра и оставшееся время считаем от момента, когда он взял
+   заявку: ~90 секунд на отрезок, всего около 12 минут пути */
+const travelPos=o=>Math.max(0,Math.min(8,Math.floor((Date.now()-(o&&o.takenAt||Date.now()))/90000)));
+const etaMin=o=>Math.max(1,12-Math.round((Date.now()-(o&&o.takenAt||Date.now()))/60000));
 function mapSVG(h,pos){
   const D=isDark();
   const bg=D?'#16221D':'#E4EDE7', rd=D?'#22302A':'#D3E0D8', bl=D?'#1E2C26':'#DAE7DF',
@@ -609,7 +641,7 @@ function profileView(){
       </div></div></div>
     ${isVo?`<div class="q-lvl">${ring(v.pts)}
       <div style="flex:1"><div class="t">${lvl(v.pts)}</div>
-        <div class="b">${v.done} заявок${v.avg?' · оценка '+v.avg.toFixed(1).replace('.',','):''}</div>
+        <div class="b">${v.done} ${plural(v.done,"заявка","заявки","заявок")}${v.avg?' · оценка '+v.avg.toFixed(1).replace('.',','):''}</div>
         <div class="p">${v.pts} / ${nextLvl(v.pts)}</div></div></div>`:''}
     <div class="q-stats">
       ${isVo
@@ -716,11 +748,17 @@ function cHome(){
   const last=done[0];
   return wrap(`<div class="pad">
     <div class="q-top">${logo()}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
-    <h3 class="q-hi">Салом, ${esc(me.name)}<span>Вынести мусор — одна кнопка</span></h3>
-    <button class="q-hero" onclick="go('new')">${LEAF}
-      <span class="k">Забрать сегодня</span><span class="t">Вынести мусор</span>
-      <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
-      <span class="go">→</span></button>
+    <h3 class="q-hi">Салом, ${esc(me.name)}<span>${S.myOrder
+      ? 'Ваша заявка сейчас в работе' : 'Вынести мусор — одна кнопка'}</span></h3>
+    ${S.myOrder
+      ? `<button class="q-hero" onclick="go('live')">${LEAF}
+          <span class="k">${CSTEP[Math.min(phaseOf(S.myOrder),3)][0]}</span>
+          <span class="t">Заявка в работе</span>
+          <span class="s">${esc(A(S.myOrder))}</span><span class="go">→</span></button>`
+      : `<button class="q-hero" onclick="go('new')">${LEAF}
+          <span class="k">Забрать сегодня</span><span class="t">Вынести мусор</span>
+          <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
+          <span class="go">→</span></button>`}
     <div class="q-stats">
       <div class="q-st"><div class="n">${done.length}</div><div class="c">раз вынесли за вас</div></div>
       <div class="q-st"><div class="n">${done.length*3}<small>кг</small></div>
@@ -769,14 +807,17 @@ function cNew(){
 function cLive(){
   const o=S.myOrder; if(!o) return cHome();
   const ph=phaseOf(o), st=Math.min(ph,3);
-  const pos=Math.min(8,Math.floor((Date.now()-(o.takenAt||Date.now()))/60000*1.6));
+  const pos=travelPos(o);
   return wrap(`<div class="pad">
     <div class="q-top">${logo()}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
     <div class="q-live">${LEAF}
       <div class="k">${ph===0?(S.noVol?'Пока никто не откликнулся':'Ищем волонтёра'):CSTEP[st][0]}</div>
       ${ph===0
         ? `<div class="t">${S.noVol?'Волонтёров рядом сейчас нет':'Заявка отправлена'}</div>`
-        : `<div class="t">${esc(A(o))}</div>`}
+        : ph===1
+          ? `<div class="eta"><span data-eta>${etaMin(o)}</span><small>мин</small></div>
+             <div class="t" style="font-size:17px">${esc(A(o))}</div>`
+          : `<div class="t">${esc(A(o))}</div>`}
       <div class="s">${ph===0&&S.noVol
         ? 'Обычно кто-то берёт за 10–20 минут. Сейчас все заняты или далеко.'
         : CSTEP[st][1]}</div>
@@ -798,13 +839,13 @@ function cLive(){
         ${i<3?'<div class="ln"></div>':''}</div>
         <div><div class="t">${s[0]}</div><div class="b">${s[1]}</div></div></div>`}).join('')}</div>
     ${ph===0&&!S.noVol?`<button class="q-btn ghost push" onclick="cancelOrder()">Отменить заявку</button>`:''}
-  </div>`,null);
+  </div>`,'home');
 }
 function cHist(){
   const list=myOrders().filter(o=>o.status==='done');
   return wrap(`<div class="pad">
     <h3 class="q-h2">История</h3>
-    <p class="q-help">Всего ${list.length} заявок · ${list.length*3} кг не осталось у подъезда</p>
+    <p class="q-help">Всего ${list.length} ${plural(list.length,"заявка","заявки","заявок")} · ${list.length*3} кг не осталось у подъезда</p>
     ${list.length?list.map(o=>`<div class="q-card">
       <div class="q-row"><div class="q-ic">✓</div>
         <div style="flex:1"><div class="a">${esc(A(o))}</div>
@@ -850,7 +891,7 @@ function cFin(){
       ${S.rating?`<div class="q-f"><label>${S.rating<=3?'Расскажите подробнее':'Почему такая оценка'}</label>
         <textarea placeholder="Необязательно" oninput="S.comment=this.value">${esc(S.comment)}</textarea></div>`:''}`}
     <button class="q-btn push" onclick="sendRating()">${S.rating&&!already?'Отправить и закрыть':'Готово'}</button>
-  </div>`,null);
+  </div>`,'home');
 }
 
 /* ================= экраны волонтёра ================= */
@@ -860,7 +901,7 @@ function vHome(){
   return wrap(`<div class="pad">
     <div class="q-top">${logo('волонтёр')}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
     <h3 class="q-hi">Салом, ${esc(me.name)}<span>${list.length
-      ? `${list.length} ${list.length===1?'заявка ждёт':'заявки ждут'} рядом`
+      ? `${list.length} ${plural(list.length,'заявка ждёт','заявки ждут','заявок ждут')} рядом`
       :'Заявок рядом пока нет'}</span></h3>
     <div class="q-air ${S.onair?'on':''}">
       <div style="flex:1"><div class="t">${S.onair?'Вы на связи':'Уведомления выключены'}</div>
@@ -897,7 +938,7 @@ function vHome(){
 function vWork(){
   const o=S.activeJob; if(!o){ S.view='home'; return vHome() }
   const ph=phaseOf(o), st=Math.max(0,Math.min(ph-1,3));
-  const pos=Math.min(8,Math.floor((Date.now()-(o.takenAt||Date.now()))/60000*1.6));
+  const pos=travelPos(o);
   return wrap(`<div class="pad">
     <div class="q-top">${logo('волонтёр')}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
     <div class="q-live">${LEAF}
@@ -931,14 +972,14 @@ function vWork(){
         Не смогу выполнить</button>`:''}
       <button class="q-btn ghost" style="margin-top:9px" onclick="maps()">Открыть в картах</button>
     </div>
-  </div>`,null);
+  </div>`,'home');
 }
 function vHist(){
   const list=myJobs().filter(o=>o.status==='done');
   const v=vStats();
   return wrap(`<div class="pad">
     <h3 class="q-h2">История</h3>
-    <p class="q-help">${v.done} заявок закрыто · ${v.pts} очков всего</p>
+    <p class="q-help">${v.done} ${plural(v.done,"заявка закрыта","заявки закрыто","заявок закрыто")} · ${v.pts} очков всего</p>
     ${list.length?list.map(o=>`<div class="q-card">
       <div class="q-row"><div class="q-ic">✓</div>
         <div style="flex:1"><div class="a">${esc(A(o))}</div>
@@ -959,7 +1000,7 @@ function vRev(){
     <div class="q-score">
       <div><div class="big">${v.avg?v.avg.toFixed(1).replace('.',','):'—'}</div>
         <div style="font-size:13px;color:var(--sun);letter-spacing:1px">${v.avg?st5(Math.round(v.avg)):'☆☆☆☆☆'}</div>
-        <div class="sub">${list.length} оценок</div></div>
+        <div class="sub">${list.length} ${plural(list.length,"оценка","оценки","оценок")}</div></div>
       <div class="q-dist">${[5,4,3,2,1].map(n=>`<div class="q-drow"><span>${n}★</span>
         <span class="tr"><i style="width:${(d[n]/tot*100)||0}%"></i></span>
         <span class="cnt">${d[n]}</span></div>`).join('')}</div></div>
@@ -996,7 +1037,7 @@ function vFin(){
       ${S.rating?`<div class="q-f"><label>${S.rating<=3?'Расскажите подробнее':'Почему такая оценка'}</label>
         <textarea placeholder="Необязательно" oninput="S.comment=this.value">${esc(S.comment)}</textarea></div>`:''}`}
     <button class="q-btn push" onclick="sendRating()">${S.rating&&!already?'Отправить и закрыть':'К заявкам'}</button>
-  </div>`,null);
+  </div>`,'home');
 }
 
 /* ================= рендер ================= */
@@ -1013,6 +1054,22 @@ function render(){
        set:settingsView,help:helpView};
   $('#app').innerHTML=(V[S.view]||V.home)();
 }
+/* Пока волонтёр в пути, двигаем точку и минуты точечно — без пересборки
+   всего экрана: полная перерисовка сбрасывает прокрутку и тормозит. */
+function tickLive(){
+  const o = ROLE==='cl' ? S.myOrder : S.activeJob;
+  if(!o||!o.takenAt) return;
+  if(S.view!=='live'&&S.view!=='work') return;
+  const ph=phaseOf(o); if(ph<1||ph>2) return;
+  const p=ROUTE[Math.min(travelPos(o),ROUTE.length-1)];
+  document.querySelectorAll('.q-vdot').forEach(el=>{
+    el.setAttribute('cx',p[0]); el.setAttribute('cy',p[1]);
+  });
+  const e=document.querySelector('[data-eta]');
+  if(e) e.textContent=etaMin(o);
+}
+setInterval(tickLive,4000);
+
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');
   clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('on'),2600)}
 function conn(msg){const c=$('#conn');
@@ -1021,7 +1078,7 @@ function conn(msg){const c=$('#conn');
 
 /* ================= подключение ================= */
 function boot(){
-  applyChrome(); render();
+  fitViewport(); applyChrome(); render();
   try{
     firebase.initializeApp(CFG);
     db=firebase.database();
@@ -1288,9 +1345,26 @@ function giveUp(){
 }
 function snap(inp){
   const f=inp.files&&inp.files[0]; if(!f) return;
-  const r=new FileReader();
-  r.onload=e=>{ S.photoURL=e.target.result; render(); toast('Фото прикреплено') };
-  r.readAsDataURL(f);
+  // Снимок с камеры весит несколько мегабайт. Раньше он клался в разметку
+  // как есть и пересобирался при каждом обновлении из базы — телефон вставал.
+  // Ужимаем до 1000 px по длинной стороне, получается ~100 КБ.
+  const url=URL.createObjectURL(f);
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=1000; let w=img.width,h=img.height;
+    if(w>=h && w>MAX){ h=Math.round(h*MAX/w); w=MAX }
+    else if(h>w && h>MAX){ w=Math.round(w*MAX/h); h=MAX }
+    try{
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      S.photoURL=c.toDataURL('image/jpeg',0.7);
+    }catch(e){ S.photoURL=null }
+    URL.revokeObjectURL(url);
+    if(S.photoURL){ render(); toast('Фото прикреплено') }
+    else toast('Не удалось обработать фото');
+  };
+  img.onerror=()=>{ URL.revokeObjectURL(url); toast('Не удалось открыть фото') };
+  img.src=url;
 }
 function toggleAir(){
   S.onair=!S.onair; render();
