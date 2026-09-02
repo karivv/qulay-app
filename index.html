@@ -1384,10 +1384,15 @@ const UZ_RE=[
   [/^(\d+) ч назад$/,"$1 soat oldin"],
 ];
 function uzText(s){
-  const k=s.trim(); if(!k) return null;
-  if(UZ[k]) return s.replace(k,UZ[k]);
-  for(const [re,to] of UZ_RE){ if(re.test(k)) return s.replace(k,k.replace(re,to)) }
-  return null;
+  // В шаблонах длинные фразы разбиты на строки, поэтому в тексте попадаются
+  // переносы и отступы. Схлопываем пробелы перед поиском, но возвращаем
+  // отступы на место — иначе слипнутся куски вокруг выделенного текста.
+  const m=String(s).match(/^(\s*)([\s\S]*?)(\s*)$/);
+  const k=m[2].replace(/\s+/g,' ');
+  if(!k) return null;
+  let v=UZ[k];
+  if(v==null){ for(const [re,to] of UZ_RE){ if(re.test(k)){ v=k.replace(re,to); break } } }
+  return v==null?null:m[1]+v+m[3];
 }
 /* Проходим по текстовым узлам готового экрана. Код и обработчики не трогаем. */
 function localize(root){
