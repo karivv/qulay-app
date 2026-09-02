@@ -376,8 +376,11 @@ const S={
   set:JSON.parse(localStorage.getItem('qulay_set')||'null')||
       {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',
        lang:((tgUser&&tgUser.language_code)||'').slice(0,2)==='uz'?'uz':'ru'},
+
 };
 if(me&&me.addr) S.addr=me.addr;
+/* ?lang=uz — быстрый способ посмотреть перевод, не заходя в настройки */
+if(P.get('lang')==='uz'||P.get('lang')==='ru') S.set.lang=P.get('lang');
 
 const BAGS=['Один пакет','Два-три пакета','Крупный мусор','Стекло / банки'];
 const TIMES=['14:00','16:00','18:00','20:00'];
