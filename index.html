@@ -371,8 +371,11 @@ const S={
   rating:0, comment:'', reasons:[],
   noVol:false, waitUntil:0, seen:new Set(), primed:false,
   geo:null, geoState:'idle',   /* idle | asking | ok | denied | unsupported */
+  /* язык при первом запуске берём из Telegram: у узбекоязычных он и должен
+     открыться на узбекском, а не заставлять искать настройку */
   set:JSON.parse(localStorage.getItem('qulay_set')||'null')||
-      {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',lang:'ru'},
+      {theme:'auto',big:false,sound:true,vibro:true,radius:'1 км',
+       lang:((tgUser&&tgUser.language_code)||'').slice(0,2)==='uz'?'uz':'ru'},
 };
 if(me&&me.addr) S.addr=me.addr;
 
@@ -1139,20 +1142,252 @@ function vFin(){
   </div>`,'home');
 }
 
+/* ==================================================================
+   O‘ZBEKCHA. Перевод сделан слоем поверх готового экрана: render()
+   как и раньше собирает русскую разметку, а localize() проходит по
+   ТЕКСТОВЫМ УЗЛАМ и подменяет их. Обработчики onclick и любой код
+   при этом не затрагиваются — сломать логику такой перевод не может.
+   Строка без перевода просто останется русской.
+   ================================================================== */
+const UZ={
+/* шапки, разделы */
+"Адрес":"Manzil","Активная заявка":"Faol buyurtma","Без комментария":"Izohsiz",
+"Безопасность":"Xavfsizlik","Ближайший волонтёр":"Eng yaqin ko‘ngilli",
+"Ваше фото":"Sizning rasmingiz","Ваши шаги":"Sizning qadamlaringiz",
+"Вернуться к заявке":"Buyurtmaga qaytish","Взять":"Olish","Вибрация":"Tebranish",
+"Вы вступаете":"Siz qo‘shilyapsiz","Вынести мусор":"Chiqindini chiqarish",
+"Геопозиция":"Joylashuv","Геопозиция есть":"Joylashuv aniqlandi","Данные":"Ma’lumotlar",
+"Добро пожаловать":"Xush kelibsiz","Документ":"Hujjat",
+"Доступ приостановлен":"Kirish to‘xtatilgan","Его номер":"Uning raqami","Ещё":"Yana",
+"Женщина":"Ayol","За что дают очки":"Ochkolar nima uchun beriladi",
+"Забрать сегодня":"Bugun olib ketish","Загружаем…":"Yuklanmoqda…",
+"Заказать так же":"Xuddi shunday buyurtma","Зачем номер":"Raqam nima uchun",
+"Заявка в работе":"Buyurtma bajarilmoqda","Заявка закрыта":"Buyurtma yopildi",
+"Заявки рядом":"Yaqindagi buyurtmalar","Заявок пока не было":"Hozircha buyurtma bo‘lmagan",
+"Звук":"Ovoz","Значки":"Nishonlar","Имя":"Ism","Имя друга":"Do‘stingiz ismi",
+"История":"Tarix","Как в телефоне":"Telefondagidek","Как вам житель":"Yashovchi qanday edi",
+"Как вас зовут":"Ismingiz","Как далеко готовы идти":"Qancha uzoqqa borasiz",
+"Карты":"Xaritalar","Квартира":"Xonadon","Ко времени":"Vaqtga","Когда забрать":"Qachon olib ketish",
+"Кого вы пригласили":"Siz taklif qilganlar","Код приглашения":"Taklif kodi","Комментарий":"Izoh",
+"Крупный":"Yirik","Кто придёт":"Kim keladi","Мужчина":"Erkak","Мусор забран":"Chiqindi olib ketildi",
+"Нажмите, чтобы переснять":"Qayta suratga olish uchun bosing",
+"Напишите в чат бота Qulay":"Qulay botiga yozing","Настройки":"Sozlamalar",
+"Новая заявка":"Yangi buyurtma","Новая заявка рядом":"Yaqinda yangi buyurtma",
+"Номер телефона":"Telefon raqami","О сервисе":"Xizmat haqida","Обычный":"Oddiy",
+"Определяем…":"Aniqlanmoqda…","Организатор":"Tashkilotchi","От жителя":"Yashovchidan",
+"Отменить заявку":"Buyurtmani bekor qilish","Отправить запрос":"So‘rov yuborish",
+"Отправить ссылку":"Havolani yuborish","Оформление":"Ko‘rinish",
+"Оценки обо мне":"Men haqimdagi baholar","Оценок пока нет":"Hozircha baho yo‘q",
+"Пакет забрал":"Paketni oldim","Повторить":"Takrorlash","Подождать ещё":"Yana kutish",
+"Подъезд":"Podez","Пожаловаться":"Shikoyat qilish",
+"Позвать друга в волонтёры":"Do‘stni ko‘ngilli qilib chaqirish","Позвать соседа":"Qo‘shnini chaqirish",
+"Пока пусто":"Hozircha bo‘sh","Помощь и правила":"Yordam va qoidalar",
+"Последняя заявка":"Oxirgi buyurtma","Поставить оценку":"Baho qo‘yish","Приглашения":"Takliflar",
+"Проверьте имя":"Ismni tekshiring","Пусть придёт женщина":"Ayol kelsin",
+"Размер текста":"Matn o‘lchami","Рейтинг пока пуст":"Reyting hozircha bo‘sh",
+"Роль: волонтёр":"Rol: ko‘ngilli","Русский":"Ruscha","Светлая":"Yorug‘",
+"Сделайте фото лица":"Yuzingizni suratga oling","Сейчас":"Hozir",
+"Сейчас всё чисто":"Hozir hammasi toza","Сколько это стоит":"Bu qancha turadi",
+"Сохранить":"Saqlash","Телефон":"Telefon","Тёмная":"Qorong‘i","Уведомления":"Bildirishnomalar",
+"Фото добавлено":"Rasm qo‘shildi","Фото у контейнера":"Konteyner oldida rasm",
+"Частые вопросы":"Ko‘p so‘raladigan savollar","Что выносим":"Nimani chiqaramiz",
+"Что можно сделать":"Nima qilish mumkin","Что нельзя выносить":"Nimani chiqarish mumkin emas",
+"Что нельзя выносить →":"Nimani chiqarish mumkin emas →","Что пишут жители":"Yashovchilar nima yozadi",
+"Что пошло не так":"Nima noto‘g‘ri ketdi","Что происходит":"Nima bo‘lyapti",
+"Что-то не так":"Nimadir noto‘g‘ri","Этаж":"Qavat","Я на месте":"Yetib keldim","Язык":"Til",
+"Дом":"Uy","Женщина ":"Ayol",
+/* мелкие подписи */
+"заявок закрыто":"buyurtma yopildi","как волонтёр":"ko‘ngilli sifatida",
+"место в вашем доме":"uyingizdagi o‘rin","место в доме":"uydagi o‘rin",
+"место в районе":"tumandagi o‘rin","мин":"daq","не осталось у подъезда":"podez oldida qolmadi",
+"раз вынесли за вас":"marta siz uchun chiqarildi","средняя оценка":"o‘rtacha baho",
+"только организатор":"faqat tashkilotchi",
+"← Назад":"← Orqaga","← Настройки":"← Sozlamalar","← Профиль":"← Profil","📷 Фото":"📷 Rasm",
+/* длинные пояснения */
+"Жители будут видеть это имя и ваш рейтинг.":"Yashovchilar shu ismni va reytingingizni ko‘radi.",
+"Волонтёр позвонит, если не найдёт подъезд. Больше его никто не увидит.":
+  "Ko‘ngilli podezni topa olmasa qo‘ng‘iroq qiladi. Raqamingizni boshqa hech kim ko‘rmaydi.",
+"Волонтёр увидит, насколько вы близко":"Ko‘ngilli qanchalik yaqinligingizni ko‘radi",
+"Мусор выносят соседи-волонтёры. Бесплатно, по своей воле.":
+  "Chiqindini qo‘shni ko‘ngillilar chiqaradi. Bepul, o‘z xohishi bilan.",
+"Обязательно: житель должен видеть, кто к нему придёт":
+  "Majburiy: yashovchi kim kelishini ko‘rishi kerak",
+"Обычно приходит за 10–20 минут":"Odatda 10–20 daqiqada keladi",
+"Организатор проверит и пришлёт код приглашения":
+  "Tashkilotchi tekshirib, taklif kodini yuboradi",
+"Заявка никуда не пропала — она висит у всех волонтёров района.":
+  "Buyurtma yo‘qolmadi — u tumandagi barcha ko‘ngillilarda turibdi.",
+"Здесь появятся все ваши заявки":"Bu yerda barcha buyurtmalaringiz chiqadi",
+"Здесь появятся все закрытые заявки":"Bu yerda yopilgan buyurtmalar chiqadi",
+"Как только житель оставит заявку, она появится здесь":
+  "Yashovchi buyurtma qoldirishi bilan u shu yerda chiqadi",
+"Кто чаще пользуется сервисом. Обновляется после каждой закрытой заявки.":
+  "Kim xizmatdan ko‘proq foydalanadi. Har bir yopilgan buyurtmadan keyin yangilanadi.",
+"Ничего. Выносят соседи-волонтёры по своей воле.":
+  "Hech narsa. Qo‘shni ko‘ngillilar o‘z xohishi bilan chiqaradi.",
+"Они появятся после первых закрытых заявок":
+  "Ular birinchi yopilgan buyurtmalardan keyin paydo bo‘ladi",
+"Пакет доехал до контейнера, а не остался у подъезда.":
+  "Paket konteynergacha yetdi, podez oldida qolmadi.",
+"Первую можно оставить прямо сейчас — волонтёр придёт за 10–20 минут":
+  "Birinchisini hozir qoldirish mumkin — ko‘ngilli 10–20 daqiqada keladi",
+"Разрешите доступ, если телефон спросит":"Telefon so‘rasa, ruxsat bering",
+"Секунду, читаем ваш профиль":"Bir soniya, profilingizni o‘qiyapmiz",
+"Укажите дом в профиле, чтобы участвовать в рейтинге соседей.":
+  "Qo‘shnilar reytingida qatnashish uchun profilda uyni ko‘rsating.",
+"Укажите район в профиле, чтобы участвовать в рейтинге.":
+  "Reytingda qatnashish uchun profilda tumanni ko‘rsating.",
+"Чем больше соседей, тем чаще рядом есть свободный волонтёр":
+  "Qo‘shnilar qancha ko‘p bo‘lsa, yaqinda bo‘sh ko‘ngilli shuncha tez topiladi",
+"Запрос отправлен. Организатор пришлёт код в чат бота.":
+  "So‘rov yuborildi. Tashkilotchi kodni bot chatiga yuboradi.",
+"Держите паспорт рядом с лицом — так видно, что это вы":
+  "Pasportni yuzingiz yonida ushlang — bu siz ekaningiz ko‘rinadi",
+"Фото паспорта в руке":"Qo‘lda pasport bilan rasm","Документ добавлен":"Hujjat qo‘shildi",
+"Фото добавлено":"Rasm qo‘shildi",
+/* всплывающие сообщения */
+"Заявка отправлена волонтёрам":"Buyurtma ko‘ngillilarga yuborildi",
+"Заявка отменена":"Buyurtma bekor qilindi","Заявка ваша — житель видит, что вы в пути":
+  "Buyurtma sizniki — yashovchi yo‘lda ekaningizni ko‘ryapti",
+"Заявку уже взял другой волонтёр":"Buyurtmani boshqa ko‘ngilli oldi",
+"Заявка вернулась другим волонтёрам":"Buyurtma boshqa ko‘ngillilarga qaytdi",
+"Фото прикреплено":"Rasm biriktirildi","Сохранено":"Saqlandi","Ищем дальше":"Qidiryapmiz",
+"Спасибо, оценка отправлена":"Rahmat, baho yuborildi","Ссылка скопирована":"Havola nusxalandi",
+"Местоположение определено":"Joylashuv aniqlandi","Загружаем фото…":"Rasm yuklanmoqda…",
+"Нет связи с сервером":"Server bilan aloqa yo‘q","Проверьте имя и номер":"Ism va raqamni tekshiring",
+"Укажите дом и квартиру":"Uy va xonadonni ko‘rsating","Добавьте своё фото":"Rasmingizni qo‘shing",
+"Добавьте фото документа":"Hujjat rasmini qo‘shing",
+"Укажите, женщина вы или мужчина":"Ayol yoki erkak ekaningizni belgilang",
+"Укажите имя и номер друга":"Do‘stingiz ismi va raqamini kiriting",
+"У вас уже есть активная заявка":"Sizda allaqachon faol buyurtma bor",
+"Сначала закройте текущую заявку":"Avval joriy buyurtmani yoping",
+"Код неверный или уже использован":"Kod noto‘g‘ri yoki ishlatilgan",
+"Организатор уведомлён — он свяжется с вами":"Tashkilotchi xabardor — u siz bilan bog‘lanadi",
+"Запрос ушёл организатору — он пришлёт код":"So‘rov tashkilotchiga yuborildi — u kod yuboradi",
+"Напишите организатору в чат бота":"Tashkilotchiga bot chatiga yozing",
+"Без геопозиции расстояние показать не сможем":"Joylashuvsiz masofani ko‘rsata olmaymiz",
+"Откройте приложение из бота, чтобы получить свою ссылку":
+  "Havolangizni olish uchun ilovani botdan oching",
+"Не удалось взять заявку":"Buyurtmani olib bo‘lmadi",
+"Не удалось вернуть заявку":"Buyurtmani qaytarib bo‘lmadi",
+"Не удалось обновить статус":"Holatni yangilab bo‘lmadi",
+"Не удалось отменить":"Bekor qilib bo‘lmadi",
+"Не удалось отправить заявку":"Buyurtmani yuborib bo‘lmadi",
+"Не удалось отправить запрос":"So‘rovni yuborib bo‘lmadi",
+"Не удалось открыть фото":"Rasmni ochib bo‘lmadi",
+"Не удалось обработать фото":"Rasmni qayta ishlab bo‘lmadi",
+"Не удалось загрузить фото":"Rasmni yuklab bo‘lmadi",
+"Не удалось отправить. Позвоните организатору":"Yuborib bo‘lmadi. Tashkilotchiga qo‘ng‘iroq qiling",
+"Фото не сохранилось для этой заявки":"Bu buyurtma uchun rasm saqlanmagan",
+"Фото не сохранилось — проверьте правила Firebase":"Rasm saqlanmadi — Firebase qoidalarini tekshiring",
+"Разрешите открытие окна, чтобы увидеть фото":"Rasmni ko‘rish uchun oynani ochishga ruxsat bering",
+"Интерфейс на русском":"Interfeys ruscha","Крупный текст":"Yirik matn","Обычный текст":"Oddiy matn",
+"Тёмная тема":"Qorong‘i mavzu","Светлая тема":"Yorug‘ mavzu","Включено":"Yoqilgan","Выключено":"O‘chirilgan",
+"Прототип сброшен":"Prototip tozalandi",
+/* поля ввода */
+"Код домофона, лифт не работает":"Domofon kodi, lift ishlamayapti","Необязательно":"Majburiy emas",
+"Расскажите подробнее":"Batafsil yozing","Почему такая оценка":"Nega shunday baho",
+/* причины низкой оценки */
+"Долго ждал(а)":"Uzoq kutdim","Не пришёл":"Kelmadi","Был невежлив":"Muomalasi yomon edi",
+"Мусор не забрал":"Chiqindini olmadi","Другое":"Boshqa",
+"Долго не открывали":"Uzoq eshik ochishmadi","Мусор не тот":"Chiqindi boshqacha",
+"Адрес не совпал":"Manzil to‘g‘ri kelmadi",
+/* виды мусора */
+"Один пакет":"Bitta paket","Два-три пакета":"Ikki-uch paket",
+"Крупный мусор":"Yirik chiqindi","Стекло / банки":"Shisha / bankalar",
+/* статусы */
+"Заявка принята":"Buyurtma qabul qilindi","Ищем волонтёра рядом с вами":"Yaqinda ko‘ngilli qidiryapmiz",
+"Волонтёр в пути":"Ko‘ngilli yo‘lda","Идёт к вашему подъезду":"Podezingizga kelyapti",
+"Волонтёр у двери":"Ko‘ngilli eshik oldida","Вынесите пакет к двери":"Paketni eshik oldiga chiqaring",
+"Мусор доставлен":"Chiqindi yetkazildi","Донесён до контейнера":"Konteynergacha olib borildi",
+"Идёте к дому":"Uyga ketyapsiz","Житель видит, что вы в пути":"Yashovchi yo‘lda ekaningizni ko‘ryapti",
+"У подъезда":"Podez oldida","Житель выносит пакет":"Yashovchi paketni chiqaryapti",
+"Пакет у вас":"Paket sizda","Донесите до контейнера":"Konteynergacha olib boring",
+"Готово":"Tayyor","Очки начислены":"Ochkolar hisoblandi",
+/* уровни */
+"Новичок":"Yangi boshlovchi","Активный волонтёр":"Faol ko‘ngilli",
+"Опытный волонтёр":"Tajribali ko‘ngilli","Герой квартала":"Mahalla qahramoni",
+/* вкладки */
+"Главная":"Asosiy","Соседи":"Qo‘shnilar","Профиль":"Profil","Оценки":"Baholar",
+/* прочее */
+"Вы на связи":"Siz aloqadasiz","Уведомления выключены":"Bildirishnomalar o‘chirilgan",
+"Пришлём звук, когда появится заявка":"Buyurtma paydo bo‘lsa ovoz yuboramiz",
+"Включите, чтобы не пропустить":"O‘tkazib yubormaslik uchun yoqing",
+"Придёт любой свободный волонтёр":"Har qanday bo‘sh ko‘ngilli keladi",
+"Заявка отправлена":"Buyurtma yuborildi","Ищем волонтёра":"Ko‘ngilli qidiryapmiz",
+"Пока никто не откликнулся":"Hozircha hech kim javob bermadi",
+"Волонтёров рядом сейчас нет":"Hozir yaqinda ko‘ngilli yo‘q",
+"Заявок рядом пока нет":"Yaqinda buyurtma yo‘q",
+"Не смогу выполнить":"Bajara olmayman","Закрыть заявку":"Buyurtmani yopish",
+"Сначала фото":"Avval rasm","Взять заявку":"Buyurtmani olish",
+"Продолжить":"Davom etish","Стать волонтёром":"Ko‘ngilli bo‘lish",
+"Вызвать волонтёра":"Ko‘ngilli chaqirish","Отправить и закрыть":"Yuborish va yopish",
+"К заявкам":"Buyurtmalarga","Вернуться к заявкам":"Buyurtmalarga qaytish",
+"Можно закрывать заявку":"Buyurtmani yopish mumkin",
+"Подтверждает, что мусор доехал":"Chiqindi yetganini tasdiqlaydi",
+"Фото прикреплено":"Rasm biriktirildi",
+};
+/* строки с подставленными именами и числами — по образцу */
+const UZ_RE=[
+  [/^Салом, (.+)$/,"Salom, $1"],
+  [/^Готово, (.+)! Роль: житель$/,"Tayyor, $1! Rol: yashovchi"],
+  [/^Готово, (.+)! Роль: волонтёр$/,"Tayyor, $1! Rol: ko‘ngilli"],
+  [/^Оцените (.+)$/,"$1 ni baholang"],
+  [/^Как справился (.+)$/,"$1 qanday bajardi"],
+  [/^(.+) донёс пакет до контейнера\. Вам не пришлось выходить\.$/,
+   "$1 paketni konteynergacha olib bordi. Sizga chiqishga to‘g‘ri kelmadi."],
+  [/^До следующего уровня (\d+) очков$/,"Keyingi darajagacha $1 ochko"],
+  [/^Ищем в радиусе (.+)$/,"$1 radiusda qidiryapmiz"],
+  [/^Радиус: (.+)$/,"Radius: $1"],
+  [/^Не больше (\d+) заявок в сутки$/,"Kuniga $1 tadan ko‘p emas"],
+  [/^(\d+) оценок$/,"$1 ta baho"],
+  [/^(\d+) заявк\S* ждут? рядом$/,"Yaqinda $1 ta buyurtma kutyapti"],
+  [/^Всего (\d+) заявк\S* · (\d+) кг не осталось у подъезда$/,
+   "Jami $1 ta buyurtma · $2 kg podez oldida qolmadi"],
+  [/^(\d+) заявк\S* (?:закрыт\S*) · (\d+) очков всего$/,"$1 ta buyurtma yopildi · jami $2 ochko"],
+  [/^\+20 очков за эту заявку$/,"Bu buyurtma uchun +20 ochko"],
+  [/^(.+) м от вас$/,"Sizdan $1 m"],
+  [/^(.+) км от вас$/,"Sizdan $1 km"],
+  [/^Соседи по дому (.+)$/,"$1-uy qo‘shnilari"],
+  [/^Записать на (.+)$/,"$1 ga yozish"],
+  [/^только что$/,"hozirgina"],
+  [/^(\d+) мин назад$/,"$1 daq oldin"],
+  [/^(\d+) ч назад$/,"$1 soat oldin"],
+];
+function uzText(s){
+  const k=s.trim(); if(!k) return null;
+  if(UZ[k]) return s.replace(k,UZ[k]);
+  for(const [re,to] of UZ_RE){ if(re.test(k)) return s.replace(k,k.replace(re,to)) }
+  return null;
+}
+/* Проходим по текстовым узлам готового экрана. Код и обработчики не трогаем. */
+function localize(root){
+  if(S.set.lang!=='uz'||!root) return;
+  try{
+    const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
+    const nodes=[]; while(w.nextNode()) nodes.push(w.currentNode);
+    nodes.forEach(n=>{ const v=uzText(n.nodeValue); if(v!=null) n.nodeValue=v });
+    root.querySelectorAll('[placeholder]').forEach(el=>{
+      const v=UZ[el.getAttribute('placeholder')]; if(v) el.setAttribute('placeholder',v);
+    });
+  }catch(e){}
+}
+
 /* ================= рендер ================= */
 function render(){
   applyChrome();
   if(!S.ready){ $('#app').innerHTML=`<div class="scroll"><div class="pad">
     <div class="q-empty" style="margin:auto"><div class="e">🌿</div>
     <div class="t">Загружаем…</div><div class="b">Секунду, читаем ваш профиль</div></div></div></div>`; return }
-  if(!me||!me.phone){ $('#app').innerHTML=regView(); return }
-  if(me.blocked){ $('#app').innerHTML=blockedView(); return }
+  if(!me||!me.phone){ $("#app").innerHTML=regView(); localize($("#app")); return }
+  if(me.blocked){ $("#app").innerHTML=blockedView(); localize($("#app")); return }
   const V = ROLE==='cl'
     ? {home:cHome,new:cNew,live:cLive,hist:cHist,rank:cRank,fin:cFin,prof:profileView,
        set:settingsView,help:helpView}
     : {home:vHome,work:vWork,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
        set:settingsView,help:helpView};
   $('#app').innerHTML=(V[S.view]||V.home)();
+  localize($('#app'));
 }
 /* Пока волонтёр в пути, двигаем точку и минуты точечно — без пересборки
    всего экрана: полная перерисовка сбрасывает прокрутку и тормозит. */
@@ -1170,7 +1405,7 @@ function tickLive(){
 }
 setInterval(tickLive,4000);
 
-function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');
+function toast(m){const t=$("#toast");t.textContent=(S.set.lang==="uz"&&uzText(m))||m;t.classList.add('on');
   clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('on'),2600)}
 function conn(msg){const c=$('#conn');
   if(!msg){c.classList.remove('show');return}
@@ -1332,7 +1567,7 @@ function setTheme(t){S.set.theme=t;saveSet();render();
 function setBig(b){S.set.big=b;saveSet();render();toast(b?'Крупный текст':'Обычный текст')}
 function setRadius(r){S.set.radius=r;saveSet();render();toast('Радиус: '+r)}
 function setLang(l){S.set.lang=l;saveSet();render();
-  toast(l==='uz'?'Узбекский появится в следующей версии':'Интерфейс на русском')}
+  toast(l==='uz'?'Interfeys o‘zbekchaga o‘tdi':'Интерфейс на русском')}
 function tgl(k){S.set[k]=!S.set[k];saveSet();render();toast(S.set[k]?'Включено':'Выключено')}
 function tglReason(r){const i=S.reasons.indexOf(r); if(i<0)S.reasons.push(r); else S.reasons.splice(i,1); render()}
 function rate(n){S.rating=n; if(n>3)S.reasons=[]; render()}
