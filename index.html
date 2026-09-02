@@ -386,6 +386,11 @@ const TIMES=['14:00','16:00','18:00','20:00'];
 const RADII=['500 м','1 км','3 км'];
 const RADIUS_M={'500 м':500,'1 км':1000,'3 км':3000};
 const DAY_LIMIT=3;
+/* Режим владельца на время пилота. Номер, а не uid: телефон один, а Telegram-аккаунт
+   может открыть приложение с разных устройств. Всё, что ниже завязано на isGod(),
+   для остальных работает как обычно. */
+const GOD_PHONES=['901757636'];
+function isGod(p){ return GOD_PHONES.includes(phoneDigits(p||(me&&me.phone)||'')) }
 /* через сколько сказать жителю, что заявку пока никто не взял.
    Две минуты пугали раньше времени — волонтёр столько идёт до подъезда. */
 const NO_VOL_MS=30*60*1000;
@@ -613,7 +618,8 @@ function regView(){
   const okName=S.reg.name.trim().length>=2;
   const okPhone=phoneDigits(S.reg.phone).length===9;
   const okPlace=S.reg.place.trim().length>=1;
-  const okCode=!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc);
+  const okCode=!isVo || isGod(S.reg.phone)
+    || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc);
   const ok=okName&&okPhone&&okPlace&&okCode;
   return `<div class="scroll"><div class="pad">
     ${logo(isVo?'волонтёр':'')}
@@ -672,7 +678,8 @@ function liveCheck(){
   const b=$('#r_btn'); if(!b) return;
   const isVo=ROLE==='vo';
   b.disabled=!(S.reg.name.trim().length>=2 && phoneDigits(S.reg.phone).length===9
-    && S.reg.place.trim().length>=1 && (!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc)));
+    && S.reg.place.trim().length>=1 && (!isVo || isGod(S.reg.phone)
+      || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc)));
 }
 function onPhone(inp){
   const pos=inp.selectionStart, before=inp.value.length;
@@ -768,6 +775,12 @@ function settingsView(){
     <div class="q-seg">
       <button aria-pressed="${S.set.lang==='ru'}" onclick="setLang('ru')">Русский</button>
       <button aria-pressed="${S.set.lang==='uz'}" onclick="setLang('uz')">O‘zbekcha</button></div>
+    ${isGod()?`<div class="q-lbl">Режим владельца</div>
+      <div class="q-seg">
+        <button aria-pressed="${!isVo}" onclick="godRole('client')">Я житель</button>
+        <button aria-pressed="${isVo}" onclick="godRole('volunteer')">Я волонтёр</button></div>
+      <p class="q-help">Этот блок виден только на вашем номере. Суточный лимит снят,
+        роль переключается без кода приглашения — обе стороны можно проверить с одного телефона.</p>`:''}
     <div class="q-lbl">Ещё</div>
     <div class="q-list">
       <button class="q-li" onclick="go('help')"><span class="t">Помощь и правила</span><span class="ch">›</span></button>
@@ -776,6 +789,22 @@ function settingsView(){
       <div class="q-li"><span class="t">О сервисе</span><span class="v">Qulay 1.0</span></div>
     </div>
   </div>`,'prof');
+}
+/* Переключение роли без перерегистрации — только для владельца.
+   Пишем и в Firebase тоже: иначе следующий вход прочитает старую роль
+   из профиля и вернёт всё обратно. */
+function godRole(fbRole){
+  if(!isGod()) return;
+  if((fbRole==='volunteer')===(ROLE==='vo')) return;
+  lockRole(fbRole);
+  me.role=ROLE;
+  localStorage.setItem('qulay_profile',JSON.stringify(me));
+  if(db){
+    db.ref('users/'+uid).update({role:fbRole}).catch(()=>{});
+    db.ref('leaderboard/'+uid).update({role:fbRole}).catch(()=>{});
+  }
+  S.view='home'; render();
+  toast(fbRole==='volunteer'?'Теперь вы волонтёр':'Теперь вы житель');
 }
 function helpView(){
   const isVo=ROLE==='vo';
@@ -1400,7 +1429,7 @@ function render(){
     <div class="q-empty" style="margin:auto"><div class="e">🌿</div>
     <div class="t">Загружаем…</div><div class="b">Секунду, читаем ваш профиль</div></div></div></div>`; return }
   if(!me||!me.phone){ $("#app").innerHTML=regView(); localize($("#app")); return }
-  if(me.blocked){ $("#app").innerHTML=blockedView(); localize($("#app")); return }
+  if(me.blocked&&!isGod()){ $("#app").innerHTML=blockedView(); localize($("#app")); return }
   const V = ROLE==='cl'
     ? {home:cHome,new:cNew,live:cLive,hist:cHist,rank:cRank,fin:cFin,prof:profileView,
        set:settingsView,help:helpView}
@@ -1725,11 +1754,13 @@ function saveProfile(){
   const name=S.reg.name.trim(), phone=fmtPhone(S.reg.phone), place=S.reg.place.trim();
   if(name.length<2||phoneDigits(phone).length!==9){ toast('Проверьте имя и номер'); return }
   if(!place){ toast(ROLE==='vo'?'Укажите район':'Укажите дом'); return }
-  if(ROLE==='vo'&&!S.reg.photo){ toast('Добавьте своё фото'); return }
-  if(ROLE==='vo'&&!S.reg.doc){ toast('Добавьте фото документа'); return }
+  const god=isGod(phone);
+  if(ROLE==='vo'&&!god&&!S.reg.photo){ toast('Добавьте своё фото'); return }
+  if(ROLE==='vo'&&!god&&!S.reg.doc){ toast('Добавьте фото документа'); return }
   if(!db){ toast('Нет связи с сервером'); return }
   const btn=$('#r_btn'); if(btn) btn.disabled=true;
   if(ROLE!=='vo'){ writeProfile(name,phone,'client',place); return }
+  if(god){ writeProfile(name,phone,'volunteer',place); return }   // код не спрашиваем
   const code=S.reg.code.trim().toUpperCase();
   db.ref('inviteCodes/'+code).transaction(cur=>{
     if(cur===null||cur.used) return;          // нет кода или уже потрачен
@@ -1797,12 +1828,12 @@ function saveEdits(){
 function submit(){
   // вторая одновременная заявка делала первую невидимой для жителя,
   // но она продолжала висеть у волонтёров
-  if(S.myOrder){ toast('У вас уже есть активная заявка'); S.view='live'; render(); return }
+  if(S.myOrder&&!isGod()){ toast('У вас уже есть активная заявка'); S.view='live'; render(); return }
   // мягкий предохранитель на время пилота: волонтёров мало, и один человек
   // не должен занимать их весь день
   const since=Date.now()-86400000;
   const today=myOrders().filter(o=>(o.createdAt||0)>since&&o.status!=='cancelled').length;
-  if(today>=DAY_LIMIT){ toast(`Не больше ${DAY_LIMIT} заявок в сутки`); return }
+  if(today>=DAY_LIMIT&&!isGod()){ toast(`Не больше ${DAY_LIMIT} заявок в сутки`); return }
   const h=($('#i_h').value||'').trim(), q=($('#i_q').value||'').trim();
   if(!h||!q){ toast('Укажите дом и квартиру'); return }
   S.addr={h,e:($('#i_e').value||'').trim(),f:($('#i_f').value||'').trim(),q,
