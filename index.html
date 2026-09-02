@@ -362,7 +362,8 @@ const S={
   view:'home', ready:false,
   mode:'now', timeV:'18:00', bags:'Один пакет',
   addr:{h:'',e:'',f:'',q:'',note:''},
-  reg:{name:tgName||'', phone:'', place:'', code:'', photo:null},
+  reg:{name:tgName||'', phone:'', place:'', code:'', photo:null, doc:null, gender:''},
+  prefFemale:false,             /* житель просит волонтёра-женщину */
   photos:{},                    /* кэш фото волонтёров: uid -> data URL */
   refs:{}, reqSent:false,       /* кого пригласил / запрос кода отправлен */
   orders:{}, board:{}, onair:true, photoURL:null,
@@ -559,8 +560,12 @@ const myOrders=()=>Object.entries(S.orders)
 const myJobs=()=>Object.entries(S.orders)
   .filter(([,o])=>o&&o.volunteerId===uid).map(([id,o])=>({id,...o}))
   .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+/* Заявки, доступные этому волонтёру. Просьбу «пусть придёт женщина» уважаем
+   жёстко: мужчинам такие заявки не показываем вовсе, иначе смысл теряется. */
 const openOrders=()=>Object.entries(S.orders)
-  .filter(([,o])=>o&&o.status==='open').map(([id,o])=>({id,...o}))
+  .filter(([,o])=>o&&o.status==='open'
+    && !(o.prefFemale && me && me.gender && me.gender!=='f'))
+  .map(([id,o])=>({id,...o}))
   .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 const myBoard=()=>S.board[uid]||{};
 function myAvg(){const b=myBoard();
@@ -603,7 +608,7 @@ function regView(){
   const okName=S.reg.name.trim().length>=2;
   const okPhone=phoneDigits(S.reg.phone).length===9;
   const okPlace=S.reg.place.trim().length>=1;
-  const okCode=!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo);
+  const okCode=!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc && !!S.reg.gender);
   const ok=okName&&okPhone&&okPlace&&okCode;
   return `<div class="scroll"><div class="pad">
     ${logo(isVo?'волонтёр':'')}
@@ -641,6 +646,21 @@ function regView(){
           <div class="b">Обязательно: житель должен видеть, кто к нему придёт</div>`}</label>
       <p class="q-help">Фото видит только житель, к которому вы идёте, и организатор.
         Это защита и для жителей, и для вас — чтобы под вашим именем никто не пришёл.</p>
+      <div class="q-lbl">Вы</div>
+      <div class="q-seg">
+        <button aria-pressed="${S.reg.gender==='f'}" onclick="setGender('f')">Женщина</button>
+        <button aria-pressed="${S.reg.gender==='m'}" onclick="setGender('m')">Мужчина</button></div>
+      <p class="q-help">Некоторые жители — чаще пожилые женщины — просят, чтобы приходила
+        женщина. Такие заявки будут доставаться только волонтёрам-женщинам.</p>
+      <div class="q-lbl">Документ</div>
+      <label class="q-photo ${S.reg.doc?'done':''}">
+        <input type="file" accept="image/*" capture="environment" onchange="docPhoto(this)">
+        <div class="e">${S.reg.doc?'✅':'🪪'}</div>
+        <div class="t">${S.reg.doc?'Документ добавлен':'Фото паспорта в руке'}</div>
+        <div class="b">${S.reg.doc?'Нажмите, чтобы переснять'
+          :'Держите паспорт рядом с лицом — так видно, что это вы'}</div></label>
+      <p class="q-help">Документ видит <b>только организатор</b>. Жителям он не показывается
+        никогда. Это нужно, чтобы под видом волонтёра не пришёл посторонний.</p>
       <p class="q-help">Код одноразовый. По ссылке от организатора он подставится сам —
         вводить вручную нужно, только если код передали словами.</p>`
       :`<p class="q-help">Дом нужен, чтобы показывать ваше место среди соседей
@@ -653,7 +673,7 @@ function liveCheck(){
   const b=$('#r_btn'); if(!b) return;
   const isVo=ROLE==='vo';
   b.disabled=!(S.reg.name.trim().length>=2 && phoneDigits(S.reg.phone).length===9
-    && S.reg.place.trim().length>=1 && (!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo)));
+    && S.reg.place.trim().length>=1 && (!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo && !!S.reg.doc && !!S.reg.gender)));
 }
 function onPhone(inp){
   const pos=inp.selectionStart, before=inp.value.length;
@@ -849,6 +869,13 @@ function cNew(){
       <div class="q-f"><label>Квартира</label><input id="i_q" value="${esc(S.addr.q)}" placeholder="34"></div></div>
     <div class="q-f"><label>Комментарий</label>
       <textarea id="i_n" placeholder="Код домофона, лифт не работает">${esc(S.addr.note)}</textarea></div>
+    <div class="q-lbl">Кто придёт</div>
+    <div class="q-air ${S.prefFemale?'on':''}">
+      <div style="flex:1"><div class="t">Пусть придёт женщина</div>
+        <div class="b">${S.prefFemale
+          ? 'Заявку увидят только волонтёры-женщины — ждать может быть дольше'
+          : 'Придёт любой свободный волонтёр'}</div></div>
+      ${sw(S.prefFemale,'togglePref()')}</div>
     <div class="q-lbl">Геопозиция</div>
     ${geoCard()}
     <div class="q-lbl">Что выносим</div>
@@ -897,6 +924,8 @@ function cLive(){
       return `<div class="q-step ${cls}"><div class="col"><div class="dot">${i<ph?'✓':i+1}</div>
         ${i<3?'<div class="ln"></div>':''}</div>
         <div><div class="t">${s[0]}</div><div class="b">${s[1]}</div></div></div>`}).join('')}</div>
+    ${ph>=1?`<button class="q-btn danger" style="margin-top:4px" onclick="reportIssue()">
+      Что-то не так</button>`:''}
     ${ph===0&&!S.noVol?`<button class="q-btn ghost push" onclick="cancelOrder()">Отменить заявку</button>`:''}
   </div>`,'home');
 }
@@ -1038,7 +1067,9 @@ function vWork(){
            ${S.photoURL?'Закрыть заявку':'Сначала фото'}</button>`}
       ${ph<3?`<button class="q-btn danger" style="margin-top:9px" onclick="giveUp()">
         Не смогу выполнить</button>`:''}
-      <button class="q-btn ghost" style="margin-top:9px" onclick="maps()">Открыть в картах</button>
+      <div class="q-pair" style="margin-top:9px">
+        <button class="q-btn sm ghost" onclick="maps()">Карты</button>
+        <button class="q-btn sm danger" onclick="reportIssue()">Что-то не так</button></div>
     </div>
   </div>`,'home');
 }
@@ -1115,6 +1146,7 @@ function render(){
     <div class="q-empty" style="margin:auto"><div class="e">🌿</div>
     <div class="t">Загружаем…</div><div class="b">Секунду, читаем ваш профиль</div></div></div></div>`; return }
   if(!me||!me.phone){ $('#app').innerHTML=regView(); return }
+  if(me.blocked){ $('#app').innerHTML=blockedView(); return }
   const V = ROLE==='cl'
     ? {home:cHome,new:cNew,live:cLive,hist:cHist,rank:cRank,fin:cFin,prof:profileView,
        set:settingsView,help:helpView}
@@ -1168,6 +1200,7 @@ function loadProfile(attempt){
       // пустое поле не должно молча понизить волонтёра до жителя
       if(v.role) lockRole(v.role);
       me={name:v.name||'',phone:v.phone,role:ROLE,house:v.house||'',district:v.district||'',
+          gender:v.gender||'',blocked:!!v.blocked,
           createdAt:v.createdAt||Date.now(),addr:me&&me.addr?me.addr:S.addr};
       localStorage.setItem('qulay_profile',JSON.stringify(me));
       if(me.house&&!S.addr.h) S.addr.h=me.house;
@@ -1303,6 +1336,31 @@ function setLang(l){S.set.lang=l;saveSet();render();
 function tgl(k){S.set[k]=!S.set[k];saveSet();render();toast(S.set[k]?'Включено':'Выключено')}
 function tglReason(r){const i=S.reasons.indexOf(r); if(i<0)S.reasons.push(r); else S.reasons.splice(i,1); render()}
 function rate(n){S.rating=n; if(n>3)S.reasons=[]; render()}
+/* Тревожная кнопка. Держим её на виду прямо во время заявки — искать жалобу
+   в настройках в неприятный момент никто не станет. */
+function reportIssue(){
+  const o = ROLE==='cl' ? S.myOrder : S.activeJob;
+  if(!db){ toast('Нет связи с сервером'); return }
+  db.ref('reports').push({
+    byUid:uid, byName:me.name, byPhone:me.phone, role:ROLE==='cl'?'client':'volunteer',
+    orderId:o?o.id:null, addr:o?A(o):'', at:Date.now(),
+    otherName:o?(ROLE==='cl'?(o.volunteerName||''):(o.clientName||'')):'',
+    otherPhone:o?(ROLE==='cl'?(o.volunteerPhone||''):(o.clientPhone||'')):''
+  }).then(()=>toast('Организатор уведомлён — он свяжется с вами'))
+   .catch(()=>toast('Не удалось отправить. Позвоните организатору'));
+}
+function blockedView(){
+  return `<div class="scroll"><div class="pad">
+    ${logo()}
+    <div class="q-fin" style="margin:auto 0"><div class="e">⛔️</div>
+      <h4>Доступ приостановлен</h4>
+      <p>Организатор временно закрыл доступ к сервису. Свяжитесь с ним,
+        чтобы разобраться.</p></div>
+    <div class="q-card flat push"><div class="q-row"><div class="q-ic sm sun">☎</div>
+      <div><div class="a" style="font-size:14px">Организатор</div>
+      <div class="b">Напишите в чат бота Qulay</div></div></div></div>
+  </div></div>`;
+}
 function showPhoto(id){
   if(!db){ toast('Нет связи с сервером'); return }
   toast('Загружаем фото…');
@@ -1413,6 +1471,8 @@ function saveProfile(){
   if(name.length<2||phoneDigits(phone).length!==9){ toast('Проверьте имя и номер'); return }
   if(!place){ toast(ROLE==='vo'?'Укажите район':'Укажите дом'); return }
   if(ROLE==='vo'&&!S.reg.photo){ toast('Добавьте своё фото'); return }
+  if(ROLE==='vo'&&!S.reg.gender){ toast('Укажите, женщина вы или мужчина'); return }
+  if(ROLE==='vo'&&!S.reg.doc){ toast('Добавьте фото документа'); return }
   if(!db){ toast('Нет связи с сервером'); return }
   const btn=$('#r_btn'); if(btn) btn.disabled=true;
   if(ROLE!=='vo'){ writeProfile(name,phone,'client',place); return }
@@ -1436,12 +1496,18 @@ function writeProfile(name,phone,fbRole,place){
   db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt,
     house:house||null,district:district||null,
     hasPhoto:fbRole==='volunteer'&&!!S.reg.photo,
+    hasDoc:fbRole==='volunteer'&&!!S.reg.doc,
+    gender:fbRole==='volunteer'?(S.reg.gender||null):null,
     invitedBy:(P.get('ref')||'')||null}).catch(()=>{});
   if(fbRole==='volunteer'&&S.reg.photo){
     // фото — в отдельном узле: список заявок читают все, тащить туда портреты нельзя
     S.photos[uid]=S.reg.photo;
     db.ref('volunteerPhotos/'+uid).set({img:S.reg.photo,at:Date.now()})
       .catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
+  }
+  if(fbRole==='volunteer'&&S.reg.doc){
+    // документ пишем в узел, который приложению читать нельзя — только боту
+    db.ref('volunteerDocs/'+uid).set({img:S.reg.doc,at:Date.now(),name}).catch(()=>{});
   }
   const ref=P.get('ref');
   if(ref&&ref!==uid){
@@ -1495,7 +1561,8 @@ function submit(){
     house:S.addr.h, entrance:S.addr.e, floor:S.addr.f, flat:S.addr.q,
     note:S.addr.note, bags:S.bags, when:S.mode==='now'?'сейчас':('сегодня в '+S.timeV),
     status:'open', createdAt:Date.now(),
-    lat:S.geo?S.geo.lat:null, lng:S.geo?S.geo.lng:null
+    lat:S.geo?S.geo.lat:null, lng:S.geo?S.geo.lng:null,
+    prefFemale:S.prefFemale||null
   }).then(()=>{ S.noVol=false; S.view='live'; render(); toast('Заявка отправлена волонтёрам') })
    .catch(()=>toast('Не удалось отправить заявку'));
 }
@@ -1575,6 +1642,12 @@ function readPhoto(inp,max,q,done){
 function regPhoto(inp){
   readPhoto(inp,420,0.6,d=>{ S.reg.photo=d; render(); liveCheck(); toast('Фото добавлено') });
 }
+function docPhoto(inp){
+  // документ нужен разборчивым, поэтому крупнее и качественнее портрета
+  readPhoto(inp,1100,0.7,d=>{ S.reg.doc=d; render(); liveCheck(); toast('Документ добавлен') });
+}
+function setGender(g){ S.reg.gender=g; render(); liveCheck() }
+function togglePref(){ S.prefFemale=!S.prefFemale; render() }
 /* фото волонтёра подгружаем по требованию и держим в памяти */
 function volPhoto(vid,cb){
   if(!vid||!db) return;
