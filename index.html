@@ -105,6 +105,9 @@ input,textarea{font-family:inherit}
 .q-btn.ghost{background:var(--card);color:var(--soft);box-shadow:none;border:1.5px solid var(--line)}
 .q-btn.danger{background:var(--card);color:var(--red);box-shadow:none;border:1.5px solid var(--line)}
 .q-btn.sm{padding:12px;font-size:14px;border-radius:14px;box-shadow:none}
+/* две кнопки в ряд: без этого каждая тянет свои 100% и вылезает за карточку */
+.q-pair{display:flex;gap:8px;margin-top:12px}
+.q-pair .q-btn{width:auto;flex:1;min-width:0;margin-top:0}
 .q-btn[disabled]{background:var(--card2);color:var(--mut);box-shadow:none}
 .q-back{border:none;background:none;color:var(--soft);font-size:14px;font-weight:600;
   padding:2px 0;text-align:left;flex:none}
@@ -359,7 +362,9 @@ const S={
   view:'home', ready:false,
   mode:'now', timeV:'18:00', bags:'Один пакет',
   addr:{h:'',e:'',f:'',q:'',note:''},
-  reg:{name:tgName||'', phone:'', place:'', code:''},
+  reg:{name:tgName||'', phone:'', place:'', code:'', photo:null},
+  photos:{},                    /* кэш фото волонтёров: uid -> data URL */
+  refs:{}, reqSent:false,       /* кого пригласил / запрос кода отправлен */
   orders:{}, board:{}, onair:true, photoURL:null,
   myOrder:null, activeJob:null, finOrder:null, alertOrder:null,
   rating:0, comment:'', reasons:[],
@@ -598,7 +603,7 @@ function regView(){
   const okName=S.reg.name.trim().length>=2;
   const okPhone=phoneDigits(S.reg.phone).length===9;
   const okPlace=S.reg.place.trim().length>=1;
-  const okCode=!isVo || S.reg.code.trim().length>=4;
+  const okCode=!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo);
   const ok=okName&&okPhone&&okPlace&&okCode;
   return `<div class="scroll"><div class="pad">
     ${logo(isVo?'волонтёр':'')}
@@ -625,6 +630,17 @@ function regView(){
     ${isVo?`<div class="q-f"><label>Код приглашения</label>
       <input id="r_code" value="${esc(S.reg.code)}" placeholder="8NVZX7"
         oninput="S.reg.code=this.value.toUpperCase();liveCheck()"></div>
+      <div class="q-lbl">Ваше фото</div>
+      <label class="q-photo ${S.reg.photo?'done':''}">
+        <input type="file" accept="image/*" capture="user" onchange="regPhoto(this)">
+        ${S.reg.photo?`<img src="${S.reg.photo}" alt="ваше фото"
+            style="width:110px;height:110px;object-fit:cover;border-radius:50%;margin:0 auto;display:block">
+          <div class="t" style="margin-top:10px">Фото добавлено</div>
+          <div class="b">Нажмите, чтобы переснять</div>`
+        :`<div class="e">🙂</div><div class="t">Сделайте фото лица</div>
+          <div class="b">Обязательно: житель должен видеть, кто к нему придёт</div>`}</label>
+      <p class="q-help">Фото видит только житель, к которому вы идёте, и организатор.
+        Это защита и для жителей, и для вас — чтобы под вашим именем никто не пришёл.</p>
       <p class="q-help">Код одноразовый. По ссылке от организатора он подставится сам —
         вводить вручную нужно, только если код передали словами.</p>`
       :`<p class="q-help">Дом нужен, чтобы показывать ваше место среди соседей
@@ -637,7 +653,7 @@ function liveCheck(){
   const b=$('#r_btn'); if(!b) return;
   const isVo=ROLE==='vo';
   b.disabled=!(S.reg.name.trim().length>=2 && phoneDigits(S.reg.phone).length===9
-    && S.reg.place.trim().length>=1 && (!isVo || S.reg.code.trim().length>=4));
+    && S.reg.place.trim().length>=1 && (!isVo || (S.reg.code.trim().length>=4 && !!S.reg.photo)));
 }
 function onPhone(inp){
   const pos=inp.selectionStart, before=inp.value.length;
@@ -677,12 +693,25 @@ function profileView(){
            <div class="q-st"><div class="n">${r?'#'+r.pos:'—'}</div><div class="c">место в доме</div></div>`}
     </div>
     ${!r?`<p class="q-help">${isVo?'Укажите район':'Укажите дом'} ниже, чтобы участвовать в рейтинге.</p>`:''}
-    <div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">${isVo?'🤝':'🏡'}</div>
-      <div style="flex:1"><div class="a" style="font-size:14px">${isVo?'Позвать друга':'Позвать соседа'}</div>
-      <div class="b">${isVo?'Организатор пришлёт ему код приглашения'
-        :'Чем больше соседей, тем чаще рядом есть волонтёр'}</div></div></div>
-      <button class="q-btn sm ghost" style="margin-top:12px" onclick="invite()">
-        ${isVo?'Запросить код':'Отправить ссылку'}</button></div>
+    <div class="q-lbl">Приглашения</div>
+    <div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">🏡</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">Позвать соседа</div>
+      <div class="b">Чем больше соседей, тем чаще рядом есть свободный волонтёр</div></div></div>
+      <button class="q-btn sm ghost" style="margin-top:12px" onclick="invite()">Отправить ссылку</button>
+    </div>
+    ${isVo?`<div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">🤝</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">Позвать друга в волонтёры</div>
+      <div class="b">Организатор проверит и пришлёт код приглашения</div></div></div>
+      ${S.reqSent
+        ? `<p class="q-help" style="margin-top:10px">Запрос отправлен. Организатор пришлёт код в чат бота.</p>`
+        : `<div class="q-f" style="margin-top:12px"><label>Имя друга</label>
+             <input id="ref_name" placeholder="Азиза"></div>
+           <div class="q-f"><label>Его номер</label>
+             <input id="ref_phone" placeholder="+998 90 123 45 67"></div>
+           <button class="q-btn sm ghost" onclick="askInviteFor()">Отправить запрос</button>`}
+    </div>`:''}
+    <div class="q-lbl">Кого вы пригласили</div>
+    ${refList()}
     <div class="q-lbl">Данные</div>
     <div class="q-f"><label>Имя</label><input id="p_name" value="${esc(me.name)}"></div>
     <div class="q-f"><label>Телефон</label><input id="p_phone" value="${esc(me.phone)}"></div>
@@ -847,10 +876,14 @@ function cLive(){
       <div class="s">${ph===0&&S.noVol
         ? 'Обычно кто-то берёт за 10–20 минут. Сейчас все заняты или далеко.'
         : CSTEP[st][1]}</div>
-      ${o.volunteerName?`<div class="q-who"><div class="ph">${esc(o.volunteerName[0])}</div>
+      ${o.volunteerName?(volPhoto(o.volunteerId),`<div class="q-who">
+        ${S.photos[o.volunteerId]
+          ? `<img class="ph" src="${S.photos[o.volunteerId]}" alt="фото волонтёра"
+               style="object-fit:cover">`
+          : `<div class="ph">${esc(o.volunteerName[0])}</div>`}
         <div style="flex:1"><div class="nm">${esc(o.volunteerName)}</div>
           <div class="rt">${esc(o.volunteerPhone||'волонтёр Qulay')}</div></div>
-        ${o.volunteerPhone?`<a class="q-call" href="${telHref(o.volunteerPhone)}">✆</a>`:''}</div>`:''}</div>
+        ${o.volunteerPhone?`<a class="q-call" href="${telHref(o.volunteerPhone)}">✆</a>`:''}</div>`):''}</div>
     ${ph===0&&S.noVol?`<div class="q-card"><div class="q-row"><div class="q-ic sun">⏳</div>
       <div><div class="a">Что можно сделать</div>
       <div class="b">Заявка никуда не пропала — она висит у всех волонтёров района.</div></div></div>
@@ -879,9 +912,9 @@ function cHist(){
         <div style="text-align:right">
           <div style="font-size:13px;color:var(--sun)">${o.ratingOfVolunteer?st5(o.ratingOfVolunteer.stars):'—'}</div>
           <div class="b" style="font-size:11px">${esc(o.bags||'')}</div></div></div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div class="q-pair">
         <button class="q-btn sm ghost" onclick="go('new')">Повторить</button>
-        ${o.photo?`<button class="q-btn sm ghost" onclick="showPhoto('${o.id}')">Фото</button>`:''}</div>
+        ${o.photo?`<button class="q-btn sm ghost" onclick="showPhoto('${o.id}')">📷 Фото</button>`:''}</div>
     </div>`).join('')
     :`<div class="q-empty"><div class="e">📦</div><div class="t">Пока пусто</div>
       <div class="b">Здесь появятся все ваши заявки</div></div>`}
@@ -1164,6 +1197,7 @@ function start(){
     }).catch(()=>{});
   }
   db.ref('leaderboard').on('value',s=>{ S.board=s.val()||{}; render() },()=>{});
+  loadRefs();
   listen();
   render();
 }
@@ -1297,15 +1331,48 @@ function rateCard(){
     <button class="q-btn sm" style="margin-top:12px"
       onclick="openRating('${pr.id}')">Поставить оценку</button></div>`;
 }
+const botName=()=>P.get('bot')||'';
+function refLink(){
+  const b=botName(); return b?`https://t.me/${b}?start=ref_${uid}`:'';
+}
 function invite(){
-  if(ROLE==='vo'){ toast('Попросите у организатора код приглашения для друга'); return }
-  const bot=P.get('bot')||startParam.replace(/^bot=/,'');
-  if(!bot){ toast('Отправьте соседям ссылку на бота Qulay'); return }
-  const link='https://t.me/'+bot;
+  const link=refLink();
+  if(!link){ toast('Откройте приложение из бота, чтобы получить свою ссылку'); return }
   try{ if(TG&&TG.openTelegramLink){ TG.openTelegramLink('https://t.me/share/url?url='+
-    encodeURIComponent(link)+'&text='+encodeURIComponent('Qulay — соседи-волонтёры выносят мусор. Бесплатно.'));
+    encodeURIComponent(link)+'&text='+encodeURIComponent(
+      'Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно.'));
     return } }catch(e){}
-  toast('Ссылка: '+link);
+  try{ navigator.clipboard.writeText(link); toast('Ссылка скопирована') }
+  catch(e){ toast(link) }
+}
+/* кого этот человек привёл */
+function loadRefs(){
+  if(!db) return;
+  db.ref('referrals/'+uid).on('value',s=>{ S.refs=s.val()||{}; render() },()=>{});
+}
+function refList(){
+  const rows=Object.entries(S.refs||{}).sort((a,b)=>(b[1].at||0)-(a[1].at||0));
+  if(!rows.length) return `<div class="q-help">Пока никого. Отправьте ссылку — приглашённые
+    появятся здесь, как только зарегистрируются.</div>`;
+  return `<div class="q-list">${rows.map(([id,r])=>`<div class="q-li">
+    <span class="q-ic sm">${esc((r.name||'?')[0])}</span>
+    <span style="flex:1"><span class="t">${esc(r.name||'Без имени')}</span>
+      <div class="v" style="margin-top:2px">${esc(r.phone||'')} · ${
+        r.role==='volunteer'?'волонтёр':'житель'}</div></span>
+    <span class="v">${when(r.at||0)}</span></div>`).join('')}</div>`;
+}
+/* волонтёр просит код для друга — организатор подтверждает в боте */
+function askInviteFor(){
+  const nm=($('#ref_name')?$('#ref_name').value:'').trim();
+  const ph=fmtPhone($('#ref_phone')?$('#ref_phone').value:'');
+  if(nm.length<2||phoneDigits(ph).length!==9){ toast('Укажите имя и номер друга'); return }
+  if(!db){ toast('Нет связи с сервером'); return }
+  db.ref('inviteRequests').push({
+    byUid:uid, byName:me.name, byPhone:me.phone,
+    forName:nm, forPhone:ph, status:'pending', at:Date.now()
+  }).then(()=>{ S.reqSent=true; render();
+    toast('Запрос ушёл организатору — он пришлёт код') })
+   .catch(()=>toast('Не удалось отправить запрос'));
 }
 function askGeo(){
   if(!navigator.geolocation){ S.geoState='unsupported'; render(); return }
@@ -1345,6 +1412,7 @@ function saveProfile(){
   const name=S.reg.name.trim(), phone=fmtPhone(S.reg.phone), place=S.reg.place.trim();
   if(name.length<2||phoneDigits(phone).length!==9){ toast('Проверьте имя и номер'); return }
   if(!place){ toast(ROLE==='vo'?'Укажите район':'Укажите дом'); return }
+  if(ROLE==='vo'&&!S.reg.photo){ toast('Добавьте своё фото'); return }
   if(!db){ toast('Нет связи с сервером'); return }
   const btn=$('#r_btn'); if(btn) btn.disabled=true;
   if(ROLE!=='vo'){ writeProfile(name,phone,'client',place); return }
@@ -1366,7 +1434,20 @@ function writeProfile(name,phone,fbRole,place){
   if(house&&!S.addr.h) S.addr.h=house;
   localStorage.setItem('qulay_profile',JSON.stringify(me));
   db.ref('users/'+uid).update({name,phone,role:fbRole,createdAt:me.createdAt,
-    house:house||null,district:district||null}).catch(()=>{});
+    house:house||null,district:district||null,
+    hasPhoto:fbRole==='volunteer'&&!!S.reg.photo,
+    invitedBy:(P.get('ref')||'')||null}).catch(()=>{});
+  if(fbRole==='volunteer'&&S.reg.photo){
+    // фото — в отдельном узле: список заявок читают все, тащить туда портреты нельзя
+    S.photos[uid]=S.reg.photo;
+    db.ref('volunteerPhotos/'+uid).set({img:S.reg.photo,at:Date.now()})
+      .catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
+  }
+  const ref=P.get('ref');
+  if(ref&&ref!==uid){
+    // отмечаемся у пригласившего, чтобы он видел, кого позвал
+    db.ref('referrals/'+ref+'/'+uid).set({name,phone,role:fbRole,at:Date.now()}).catch(()=>{});
+  }
   db.ref('leaderboard/'+uid).transaction(cur=>{
     cur=cur||{points:0,ordersCompleted:0,ratingSum:0,ratingCount:0};
     cur.name=name; cur.role=fbRole; cur.house=house||null; cur.district=district||null;
@@ -1469,28 +1550,44 @@ function giveUp(){
     toast('Заявка вернулась другим волонтёрам');
   }).catch(()=>toast('Не удалось вернуть заявку'));
 }
-function snap(inp){
+/* Общий обработчик снимка: ужимает и отдаёт data URL в колбэк.
+   max — длинная сторона в пикселях, q — качество JPEG. */
+function readPhoto(inp,max,q,done){
   const f=inp.files&&inp.files[0]; if(!f) return;
-  // Снимок с камеры весит несколько мегабайт. Раньше он клался в разметку
-  // как есть и пересобирался при каждом обновлении из базы — телефон вставал.
-  // Ужимаем до 1000 px по длинной стороне, получается ~100 КБ.
   const url=URL.createObjectURL(f);
   const img=new Image();
   img.onload=()=>{
-    const MAX=800; let w=img.width,h=img.height;
-    if(w>=h && w>MAX){ h=Math.round(h*MAX/w); w=MAX }
-    else if(h>w && h>MAX){ w=Math.round(w*MAX/h); h=MAX }
+    let w=img.width,h=img.height;
+    if(w>=h && w>max){ h=Math.round(h*max/w); w=max }
+    else if(h>w && h>max){ w=Math.round(w*max/h); h=max }
+    let out=null;
     try{
       const c=document.createElement('canvas'); c.width=w; c.height=h;
       c.getContext('2d').drawImage(img,0,0,w,h);
-      S.photoURL=c.toDataURL('image/jpeg',0.6);
-    }catch(e){ S.photoURL=null }
+      out=c.toDataURL('image/jpeg',q);
+    }catch(e){}
     URL.revokeObjectURL(url);
-    if(S.photoURL){ render(); toast('Фото прикреплено') }
-    else toast('Не удалось обработать фото');
+    if(out) done(out); else toast('Не удалось обработать фото');
   };
   img.onerror=()=>{ URL.revokeObjectURL(url); toast('Не удалось открыть фото') };
   img.src=url;
+}
+function regPhoto(inp){
+  readPhoto(inp,420,0.6,d=>{ S.reg.photo=d; render(); liveCheck(); toast('Фото добавлено') });
+}
+/* фото волонтёра подгружаем по требованию и держим в памяти */
+function volPhoto(vid,cb){
+  if(!vid||!db) return;
+  if(S.photos[vid]!==undefined){ cb&&cb(S.photos[vid]); return }
+  S.photos[vid]=null;
+  db.ref('volunteerPhotos/'+vid+'/img').once('value').then(s=>{
+    S.photos[vid]=s.val()||null;
+    if(S.photos[vid]) render();
+  }).catch(()=>{});
+}
+function snap(inp){
+  // снимок у контейнера: 800 px хватает как доказательство, ~80 КБ
+  readPhoto(inp,800,0.6,d=>{ S.photoURL=d; render(); toast('Фото прикреплено') });
 }
 function toggleAir(){
   S.onair=!S.onair; render();
