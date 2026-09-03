@@ -1702,9 +1702,9 @@ function render(){
        set:settingsView,help:helpView}
     : {home:vHome,work:vWork,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
        set:settingsView,help:helpView};
-  killMap(mapPick);mapPick=null; killMap(mapLive);mapLive=null;liveMarker=null;
+  killMap(mapPick);mapPick=null; killMap(mapLive);mapLive=null;liveMarker=null;clientMarker=null;
   killMap(mapVol);mapVol=null;volMarkers=[];
-  if(!S.activeJob) stopGeoTrack();
+  if(ROLE==='vo'?!S.activeJob:!S.myOrder) stopGeoTrack();
   $('#app').innerHTML=(V[S.view]||V.home)()+lbView();
   localize($('#app'));
   syncBack();
@@ -1742,7 +1742,7 @@ setInterval(tickLive,4000);
 /* ================= Leaflet-карты ================= */
 const TASH=[41.311,69.280];
 let mapPick=null, mapLive=null, mapVol=null;
-let liveMarker=null, volMarkers=[], geoWatch=null;
+let liveMarker=null, clientMarker=null, volMarkers=[], geoWatch=null;
 
 function killMap(m){try{if(m){m.off();m.remove()}}catch(e){}}
 function tileLayer(){
@@ -1758,6 +1758,10 @@ function volIcon(){
 }
 function orderIcon(){
   return L.divIcon({className:'',html:'<div style="font-size:22px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">📦</div>',
+    iconSize:[22,22],iconAnchor:[11,22]});
+}
+function clientIcon(){
+  return L.divIcon({className:'',html:'<div style="font-size:22px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">🏠</div>',
     iconSize:[22,22],iconAnchor:[11,22]});
 }
 
@@ -1789,11 +1793,20 @@ function afterRender(){
     if(vLat!=null&&vLng!=null){
       liveMarker=L.marker([vLat,vLng],{icon:volIcon()}).addTo(mapLive);
     }
+    const cLat=o&&o.clientLat, cLng=o&&o.clientLng;
+    if(cLat!=null&&cLng!=null){
+      clientMarker=L.marker([cLat,cLng],{icon:clientIcon()}).addTo(mapLive);
+    }
     setTimeout(()=>mapLive.invalidateSize(),200);
-  } else if(mapLive&&liveMarker){
+  } else if(mapLive){
     const o=ROLE==='cl'?S.myOrder:S.activeJob;
     if(o&&o.volunteerLat!=null&&o.volunteerLng!=null){
-      liveMarker.setLatLng([o.volunteerLat,o.volunteerLng]);
+      if(liveMarker) liveMarker.setLatLng([o.volunteerLat,o.volunteerLng]);
+      else { liveMarker=L.marker([o.volunteerLat,o.volunteerLng],{icon:volIcon()}).addTo(mapLive); }
+    }
+    if(o&&o.clientLat!=null&&o.clientLng!=null){
+      if(clientMarker) clientMarker.setLatLng([o.clientLat,o.clientLng]);
+      else { clientMarker=L.marker([o.clientLat,o.clientLng],{icon:clientIcon()}).addTo(mapLive); }
     }
   }
 
@@ -1831,16 +1844,21 @@ function updateVolMarkers(){
   }
 }
 
-/* живая геопозиция волонтёра: пишем координаты в заявку, пока приложение открыто */
+/* живая геопозиция: пишем координаты в заявку, пока приложение открыто */
 function startGeoTrack(){
-  if(ROLE!=='vo'||!S.activeJob||!db||!navigator.geolocation) return;
+  if(!db||!navigator.geolocation) return;
+  const hasOrder=ROLE==='vo'?S.activeJob:S.myOrder;
+  if(!hasOrder) return;
   if(geoWatch!=null) return;
   geoWatch=navigator.geolocation.watchPosition(p=>{
     const lat=p.coords.latitude, lng=p.coords.longitude;
     S.geo={lat,lng}; S.geoState='ok';
-    if(S.activeJob){
-      db.ref('orders/'+S.activeJob.id).update({volunteerLat:lat,volunteerLng:lng,
-        volunteerGeoAt:Date.now()}).catch(()=>{});
+    const oid=ROLE==='vo'?(S.activeJob&&S.activeJob.id):(S.myOrder&&S.myOrder.id);
+    if(oid){
+      const upd=ROLE==='vo'
+        ?{volunteerLat:lat,volunteerLng:lng,volunteerGeoAt:Date.now()}
+        :{clientLat:lat,clientLng:lng,clientGeoAt:Date.now()};
+      db.ref('orders/'+oid).update(upd).catch(()=>{});
     }
     if(db) db.ref('users/'+uid+'/geo').set({lat,lng,at:Date.now()}).catch(()=>{});
   },()=>{},{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
@@ -2109,9 +2127,12 @@ function refLink(){
 function invite(){
   const link=refLink();
   if(!link){ toast('Откройте приложение из бота, чтобы получить свою ссылку'); return }
+  const nm=MYNAME();
+  const txt=nm&&nm!=='Гость'
+    ? nm+' приглашает вас в Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно!'
+    : 'Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно.';
   try{ if(TG&&TG.openTelegramLink){ TG.openTelegramLink('https://t.me/share/url?url='+
-    encodeURIComponent(link)+'&text='+encodeURIComponent(
-      'Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно.'));
+    encodeURIComponent(link)+'&text='+encodeURIComponent(txt));
     return } }catch(e){}
   try{ navigator.clipboard.writeText(link); toast('Ссылка скопирована') }
   catch(e){ toast(link) }
