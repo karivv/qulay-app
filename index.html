@@ -419,7 +419,7 @@ function lockRole(fbRole){
 let me=null;
 try{ me=JSON.parse(localStorage.getItem('qulay_profile')||'null') }catch(e){ me=null }
 
-const obDone=!!localStorage.getItem('qulay_onboard');
+const obDone=!!localStorage.getItem('qulay_onboard')||!!(me&&me.phone);
 const S={
   view:'home', ready:false, ob:obDone?-1:0,
   mode:'now', timeV:'18:00', bags:'Один пакет',
@@ -735,8 +735,8 @@ function obLangView(){
     <h2>Qulay</h2>
     <p>Выберите язык / Tilni tanlang</p>
     <div class="q-lang">
-      <button onclick="obSetLang('ru')">🇷🇺 Русский</button>
-      <button onclick="obSetLang('uz')">🇺🇿 O'zbekcha</button>
+      <button onclick="obSetLang('ru')">Русский</button>
+      <button onclick="obSetLang('uz')">O'zbekcha</button>
     </div>
   </div></div>`;
 }
