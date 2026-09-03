@@ -7,6 +7,8 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 /* ==================================================================
    QULAY — направление «Росток». Светлая и тёмная тема.
@@ -326,6 +328,43 @@ input,textarea{font-family:inherit}
 .q.big .q-air .t,.q.big .q-lvl .t,.q.big .q-empty .t{font-size:16.5px}
 .q.big .q-lbl{font-size:12px}
 .q.big .q-rev .tx{font-size:15.5px}
+
+/* экраны знакомства */
+.q-ob{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:32px 24px;min-height:100%;gap:18px}
+.q-ob .e{font-size:72px;line-height:1;animation:pop .55s cubic-bezier(.2,1.35,.4,1)}
+.q-ob h2{margin:0;font-size:28px;font-weight:700;letter-spacing:-.04em;line-height:1.15}
+.q-ob p{margin:0;font-size:15px;color:var(--soft);line-height:1.6;max-width:32ch}
+.q-ob .steps{display:flex;flex-direction:column;gap:16px;text-align:left;width:100%;max-width:320px}
+.q-ob .stp{display:flex;gap:12px;align-items:flex-start}
+.q-ob .stp .num{width:32px;height:32px;border-radius:50%;background:var(--gbg);color:var(--emph);
+  display:grid;place-items:center;font-size:14px;font-weight:700;flex:none}
+.q-ob .stp .tx{font-size:14.5px;font-weight:500;line-height:1.45;color:var(--ink)}
+.q-ob .dots{display:flex;gap:8px}
+.q-ob .dots i{width:8px;height:8px;border-radius:50%;background:var(--card2)}
+.q-ob .dots i.on{background:var(--g);width:24px;border-radius:4px}
+.q-lang{display:flex;flex-direction:column;gap:12px;width:100%;max-width:300px}
+.q-lang button{border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:20px;
+  padding:18px;font-size:17px;font-weight:700;transition:.15s}
+.q-lang button:active{transform:scale(.97)}
+
+/* Leaflet-карта внутри приложения */
+.q-leaflet{border-radius:22px;overflow:hidden;flex:none;box-shadow:var(--sh);height:200px;position:relative;z-index:0}
+.q-leaflet.tall{height:280px}
+.q-leaflet .leaflet-control-attribution{display:none}
+.q-leaflet .leaflet-control-zoom{display:none}
+.q-pin-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-100%);
+  font-size:32px;z-index:999;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+.q-pin-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:999;
+  background:var(--inv-bg);color:var(--inv-ink);padding:8px 14px;border-radius:12px;
+  font-size:12.5px;font-weight:600;white-space:nowrap;pointer-events:none}
+
+/* памятка на экране ожидания */
+.q-memo{background:var(--card);border-radius:20px;padding:16px;flex:none;box-shadow:var(--sh)}
+.q-memo .hd{font-size:13px;font-weight:700;color:var(--emph);margin-bottom:10px}
+.q-memo li{font-size:13px;color:var(--soft);line-height:1.5;margin-bottom:6px;list-style:none;
+  padding-left:20px;position:relative}
+.q-memo li::before{content:'✓';position:absolute;left:0;color:var(--g);font-weight:700}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=Comfortaa:wght@600;700&display=swap">
 </head>
@@ -380,8 +419,9 @@ function lockRole(fbRole){
 let me=null;
 try{ me=JSON.parse(localStorage.getItem('qulay_profile')||'null') }catch(e){ me=null }
 
+const obDone=!!localStorage.getItem('qulay_onboard');
 const S={
-  view:'home', ready:false,
+  view:'home', ready:false, ob:obDone?-1:0,
   mode:'now', timeV:'18:00', bags:'Один пакет',
   addr:{h:'',e:'',f:'',q:'',note:''},
   reg:{name:tgName||'', phone:'', place:'', code:'', photo:null, doc:null},
@@ -685,6 +725,76 @@ function distOf(list){
   return d;
 }
 
+/* ================= экраны знакомства ================= */
+function obDots(n){
+  return `<div class="dots">${[0,1,2].map(i=>`<i class="${i===n?'on':''}"></i>`).join('')}</div>`;
+}
+function obLangView(){
+  return `<div class="scroll"><div class="q-ob">
+    <div class="e">🌿</div>
+    <h2>Qulay</h2>
+    <p>Выберите язык / Tilni tanlang</p>
+    <div class="q-lang">
+      <button onclick="obSetLang('ru')">🇷🇺 Русский</button>
+      <button onclick="obSetLang('uz')">🇺🇿 O'zbekcha</button>
+    </div>
+  </div></div>`;
+}
+function obWelcomeView(){
+  const uz=S.set.lang==='uz';
+  return `<div class="scroll"><div class="q-ob">
+    <div class="e">🏠</div>
+    <h2>${uz?'Chiqindini olib ketamiz':'Мусор вынесут за вас'}</h2>
+    <p>${uz?'Qulay — qo\'shni ko\'ngillilar chiqindini uyingizdan konteynergacha olib borishadi. Bepul.':'Qulay — соседи-волонтёры заберут мусор от вашей двери до контейнера. Бесплатно.'}</p>
+    <div class="steps">
+      <div class="stp"><div class="num">1</div><div class="tx">${uz?'Buyurtma qoldiring — manzil va vaqtni tanlang':'Оставьте заявку — укажите адрес и время'}</div></div>
+      <div class="stp"><div class="num">2</div><div class="tx">${uz?'Ko\'ngilli keladi va paketni oladi':'Волонтёр придёт и заберёт пакет'}</div></div>
+      <div class="stp"><div class="num">3</div><div class="tx">${uz?'Xaritada ko\'ring — chiqindi konteynergacha yetdi':'Видите на карте — мусор доехал до контейнера'}</div></div>
+    </div>
+    ${obDots(0)}
+    <button class="q-btn" style="max-width:300px" onclick="obNext()">${uz?'Davom etish':'Далее'}</button>
+  </div></div>`;
+}
+function obSafetyView(){
+  const uz=S.set.lang==='uz';
+  return `<div class="scroll"><div class="q-ob">
+    <div class="e">🛡️</div>
+    <h2>${uz?'Xavfsizlik':'Безопасность'}</h2>
+    <p>${uz?'Barchaning xotirjamligi uchun bir necha oddiy qoidalar.':'Несколько простых правил для спокойствия каждого.'}</p>
+    <div class="steps">
+      <div class="stp"><div class="num">🔒</div><div class="tx">${uz?'Paketni eshik oldiga qo\'ying. Ko\'ngilli ichkariga kirmaydi.':'Оставьте пакет у двери. Волонтёр внутрь не заходит.'}</div></div>
+      <div class="stp"><div class="num">👤</div><div class="tx">${uz?'Ilovada ko\'ngillining ismi va rasmi ko\'rinadi.':'В приложении видно имя и фото волонтёра.'}</div></div>
+      <div class="stp"><div class="num">⭐</div><div class="tx">${uz?'Har bir buyurtmadan keyin baho qo\'ying — bu xizmatni yaxshilashga yordam beradi.':'После каждой заявки ставьте оценку — это помогает улучшать сервис.'}</div></div>
+    </div>
+    ${obDots(1)}
+    <button class="q-btn" style="max-width:300px" onclick="obNext()">${uz?'Davom etish':'Далее'}</button>
+  </div></div>`;
+}
+function obRulesView(){
+  const uz=S.set.lang==='uz';
+  return `<div class="scroll"><div class="q-ob">
+    <div class="e">⚠️</div>
+    <h2>${uz?'Nimani chiqarish mumkin emas':'Что нельзя выносить'}</h2>
+    <p>${uz?'Ko\'ngillilar faqat oddiy maishiy chiqindini olib ketadi.':'Волонтёры забирают только обычный бытовой мусор.'}</p>
+    <div class="steps">
+      <div class="stp"><div class="num">🚫</div><div class="tx">${uz?'Batareyalar, lampalar, tibbiy chiqindi':'Батарейки, лампы, медицинские отходы'}</div></div>
+      <div class="stp"><div class="num">🚫</div><div class="tx">${uz?'Qurilish chiqindisi, bo\'yoq, suyuqliklar':'Строительный мусор, краски, жидкости'}</div></div>
+      <div class="stp"><div class="num">✅</div><div class="tx">${uz?'Paketlar, quti, shisha, bankalar — hammasi mumkin':'Пакеты, коробки, стекло, банки — всё можно'}</div></div>
+    </div>
+    ${obDots(2)}
+    <button class="q-btn" style="max-width:300px" onclick="obFinish()">${uz?'Boshlash':'Начать'}</button>
+  </div></div>`;
+}
+function obSetLang(l){
+  S.set.lang=l; saveSet(); S.ob=1; render();
+}
+function obNext(){
+  S.ob++; render();
+}
+function obFinish(){
+  S.ob=-1; localStorage.setItem('qulay_onboard','1'); render();
+}
+
 /* ================= экраны: общие ================= */
 function regView(){
   const isVo=ROLE==='vo';
@@ -870,7 +980,7 @@ function settingsView(){
       <button class="q-li" onclick="go('help')"><span class="t">Помощь и правила</span><span class="ch">›</span></button>
       <button class="q-li" onclick="reportIssue()">
         <span class="t">Пожаловаться</span><span class="ch">›</span></button>
-      <div class="q-li"><span class="t">О сервисе</span><span class="v">Qulay 1.1</span></div>
+      <div class="q-li"><span class="t">О сервисе</span><span class="v">Qulay 1.2</span></div>
     </div>
   </div>`,'prof');
 }
@@ -977,7 +1087,14 @@ function cNew(){
       : `<div class="q-chips">${slots.map(t=>
          `<button class="q-chip" aria-pressed="${S.timeV===t}" onclick="setTime('${t}')">${t}</button>`).join('')}</div>
          <p class="q-help">Заявку увидят сразу, но заберут к выбранному времени.</p>`}
-    <div class="q-lbl">Адрес</div>
+    <div class="q-lbl">Где забрать</div>
+    <div style="position:relative">
+      <div id="map-pick" class="q-leaflet tall"></div>
+      <div class="q-pin-center">📍</div>
+      <div class="q-pin-hint">Передвиньте карту к вашему дому</div>
+    </div>
+    ${S.geoState!=='ok'?`<button class="q-btn sm ghost" style="margin-top:8px" onclick="askGeoAndCenter()">📍 Определить моё место</button>`:''}
+    <div class="q-lbl">Уточните адрес</div>
     <div class="q-grid">
       <div class="q-f"><label>Дом</label><input id="i_h" value="${esc(S.addr.h)}" placeholder="12"></div>
       <div class="q-f"><label>Подъезд</label><input id="i_e" value="${esc(S.addr.e)}" placeholder="2"></div>
@@ -985,8 +1102,6 @@ function cNew(){
       <div class="q-f"><label>Квартира</label><input id="i_q" value="${esc(S.addr.q)}" placeholder="34"></div></div>
     <div class="q-f"><label>Комментарий</label>
       <textarea id="i_n" placeholder="Код домофона, лифт не работает">${esc(S.addr.note)}</textarea></div>
-    <div class="q-lbl">Геопозиция</div>
-    ${geoCard()}
     <div class="q-lbl">Что выносим</div>
     <div class="q-chips">${BAGS.map(b=>
       `<button class="q-chip" aria-pressed="${S.bags===b}" onclick="setBags('${b}')">${b}</button>`).join('')}</div>
@@ -1033,7 +1148,7 @@ function cLive(){
       <button class="q-btn sm" style="margin-top:12px" onclick="keepWaiting()">Подождать ещё</button>
       <button class="q-btn sm danger" style="margin-top:8px" onclick="cancelOrder()">Отменить заявку</button>
     </div>`:''}
-    ${ph>=1&&ph<3?`<div class="q-map">${mapSVG(178,pos)}</div>`:''}
+    ${ph>=1?`<div id="map-live" class="q-leaflet"></div>`:''}
     <div class="q-lbl">Что происходит</div>
     <div class="q-steps">${CSTEP.map((s,i)=>{
       const cls=i<ph?'ok':i===ph?'on':'';
@@ -1043,6 +1158,11 @@ function cLive(){
     ${ph>=1&&ph<3?`<div class="q-pair push">
       <button class="q-btn sm ghost" onclick="cancelOrder()">Отменить</button>
       <button class="q-btn sm danger" onclick="reportIssue()">Что-то не так</button></div>`:''}
+    ${ph===0?`<div class="q-memo"><div class="hd">Пока ждёте</div><ul>
+      <li>Завяжите пакет — так ничего не просыпется</li>
+      <li>Поставьте у двери — волонтёру не нужно заходить</li>
+      <li>Без жидкостей, батареек, строительного мусора</li>
+      <li>Если есть код домофона — укажите в комментарии</li></ul></div>`:''}
     ${ph===0&&!S.noVol?`<button class="q-btn ghost push" onclick="cancelOrder()">Отменить заявку</button>`:''}
   </div>`,'home');
 }
@@ -1122,6 +1242,7 @@ function vHome(){
         ${sw(S.onair,'toggleAir()')}</div>`}
     ${rateCard()}
     <div class="q-lbl">Заявки рядом</div>
+    ${list.some(o=>o.lat!=null)?`<div id="map-orders" class="q-leaflet tall"></div>`:''}
     ${S.geoState!=='ok'?geoCard():''}
     ${list.length?list.map(o=>{
       const m=distM(S.geo,o), far=m!=null&&m>RADIUS_M[S.set.radius], sched=whenTag(o)!=='сейчас';
@@ -1165,7 +1286,7 @@ function vWork(){
         <div style="flex:1"><div class="nm">${esc(o.clientName||'Житель')}</div>
           <div class="rt">${esc(M(o))}</div></div>
         ${o.clientPhone?`<a class="q-call" href="${telHref(o.clientPhone)}" aria-label="Позвонить">✆</a>`:''}</div></div>
-    ${ph<3?`<div class="q-map">${mapSVG(168,pos)}</div>`:''}
+    ${ph<4?`<div id="map-live" class="q-leaflet"></div>`:''}
     ${o.note?`<div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">💬</div>
       <div><div class="a" style="font-size:14px">От жителя</div><div class="b">${esc(o.note)}</div></div></div></div>`:''}
     <div class="q-lbl">Ваши шаги</div>
@@ -1497,7 +1618,12 @@ const UZ={
   "Yuz yaxshi ko‘rinishi kerak — shunda yashovchi bemalol eshik ochadi",
 "Житель должен видеть, кто к нему придёт":"Yashovchi kim kelishini ko‘rishi kerak",
 "Переснять":"Qayta suratga olish","Добавить фото":"Rasm qo‘shish","Фото обновлено":"Rasm yangilandi",
-"Карта":"Xarita","сейчас":"hozir","Позвонить":"Qo‘ng‘iroq qilish",
+"Пока ждёте":"Kutayotganingizda",
+"Завяжите пакет — так ничего не просыпется":"Paketni bog’lang — hech narsa to’kilmaydi",
+"Поставьте у двери — волонтёру не нужно заходить":"Eshik oldiga qo’ying — ko’ngilli ichkariga kirmaydi",
+"Без жидкостей, батареек, строительного мусора":"Suyuqlik, batareykalar, qurilish chiqindisisiz",
+"Если есть код домофона — укажите в комментарии":"Domofon kodi bo’lsa — izohda ko’rsating",
+"Карта":"Xarita","сейчас":"hozir","Позвонить":"Qo’ng’iroq qilish",
 "Первая заявка":"Birinchi buyurtma","Пять заявок":"Beshta buyurtma","Десять заявок":"O‘nta buyurtma",
 "Пятнадцать заявок":"O‘n beshta buyurtma","Двадцать заявок":"Yigirmata buyurtma",
 "Оценка 4,8+":"Baho 4,8+","Сто очков":"Yuz ochko","Триста очков":"Uch yuz ochko",
@@ -1562,6 +1688,10 @@ function localize(root){
 /* ================= рендер ================= */
 function render(){
   applyChrome();
+  if(S.ob>=0&&S.ob<=3){
+    const OB=[obLangView,obWelcomeView,obSafetyView,obRulesView];
+    $('#app').innerHTML=(OB[S.ob]||OB[0])();
+    fitViewport(); return }
   if(!S.ready){ $('#app').innerHTML=`<div class="scroll"><div class="pad">
     <div class="q-empty" style="margin:auto"><div class="e">🌿</div>
     <div class="t">Загружаем…</div><div class="b">Секунду, читаем ваш профиль</div></div></div></div>`; return }
@@ -1572,9 +1702,13 @@ function render(){
        set:settingsView,help:helpView}
     : {home:vHome,work:vWork,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
        set:settingsView,help:helpView};
+  killMap(mapPick);mapPick=null; killMap(mapLive);mapLive=null;liveMarker=null;
+  killMap(mapVol);mapVol=null;volMarkers=[];
+  if(!S.activeJob) stopGeoTrack();
   $('#app').innerHTML=(V[S.view]||V.home)()+lbView();
   localize($('#app'));
   syncBack();
+  setTimeout(afterRender,60);
 }
 /* фото на весь экран — поверх текущего экрана, закрывается тапом */
 function lbView(){
@@ -1604,6 +1738,116 @@ function tickLive(){
   if(e) e.textContent=etaMin(o);
 }
 setInterval(tickLive,4000);
+
+/* ================= Leaflet-карты ================= */
+const TASH=[41.311,69.280];
+let mapPick=null, mapLive=null, mapVol=null;
+let liveMarker=null, volMarkers=[], geoWatch=null;
+
+function killMap(m){try{if(m){m.off();m.remove()}}catch(e){}}
+function tileLayer(){
+  return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
+}
+function greenIcon(){
+  return L.divIcon({className:'',html:'<div style="font-size:24px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">📍</div>',
+    iconSize:[24,24],iconAnchor:[12,24]});
+}
+function volIcon(){
+  return L.divIcon({className:'',html:'<div style="font-size:22px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">🚶</div>',
+    iconSize:[22,22],iconAnchor:[11,22]});
+}
+function orderIcon(){
+  return L.divIcon({className:'',html:'<div style="font-size:22px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">📦</div>',
+    iconSize:[22,22],iconAnchor:[11,22]});
+}
+
+function afterRender(){
+  /* карта-пикер: новая заявка жильца */
+  const pickEl=document.getElementById('map-pick');
+  if(pickEl&&!pickEl._leaflet_id){
+    const ctr=S.geo?[S.geo.lat,S.geo.lng]:TASH;
+    mapPick=L.map(pickEl,{zoomControl:false,attributionControl:false}).setView(ctr,16);
+    tileLayer().addTo(mapPick);
+    mapPick.on('moveend',()=>{
+      const c=mapPick.getCenter();
+      S.geo={lat:c.lat,lng:c.lng}; S.geoState='ok';
+    });
+    setTimeout(()=>mapPick.invalidateSize(),200);
+  }
+
+  /* карта живого трекинга: заявка в работе */
+  const liveEl=document.getElementById('map-live');
+  if(liveEl&&!liveEl._leaflet_id){
+    const o=ROLE==='cl'?S.myOrder:S.activeJob;
+    const ctr=(o&&o.lat!=null)?[o.lat,o.lng]:TASH;
+    mapLive=L.map(liveEl,{zoomControl:false,attributionControl:false,dragging:true,
+      touchZoom:true,scrollWheelZoom:false}).setView(ctr,16);
+    tileLayer().addTo(mapLive);
+    if(o&&o.lat!=null) L.marker([o.lat,o.lng],{icon:greenIcon()}).addTo(mapLive)
+      .bindPopup(esc(A(o)));
+    const vLat=o&&o.volunteerLat, vLng=o&&o.volunteerLng;
+    if(vLat!=null&&vLng!=null){
+      liveMarker=L.marker([vLat,vLng],{icon:volIcon()}).addTo(mapLive);
+    }
+    setTimeout(()=>mapLive.invalidateSize(),200);
+  } else if(mapLive&&liveMarker){
+    const o=ROLE==='cl'?S.myOrder:S.activeJob;
+    if(o&&o.volunteerLat!=null&&o.volunteerLng!=null){
+      liveMarker.setLatLng([o.volunteerLat,o.volunteerLng]);
+    }
+  }
+
+  /* карта заявок для волонтёра */
+  const volEl=document.getElementById('map-orders');
+  if(volEl&&!volEl._leaflet_id){
+    const ctr=S.geo?[S.geo.lat,S.geo.lng]:TASH;
+    mapVol=L.map(volEl,{zoomControl:false,attributionControl:false}).setView(ctr,14);
+    tileLayer().addTo(mapVol);
+    if(S.geo) L.marker([S.geo.lat,S.geo.lng],{icon:volIcon()}).addTo(mapVol)
+      .bindPopup('Вы здесь');
+    updateVolMarkers();
+    setTimeout(()=>mapVol.invalidateSize(),200);
+  } else if(mapVol&&document.getElementById('map-orders')){
+    updateVolMarkers();
+  }
+
+  startGeoTrack();
+}
+function updateVolMarkers(){
+  if(!mapVol) return;
+  volMarkers.forEach(m=>mapVol.removeLayer(m));
+  volMarkers=[];
+  openOrders().forEach(o=>{
+    if(o.lat==null) return;
+    const m=L.marker([o.lat,o.lng],{icon:orderIcon()}).addTo(mapVol);
+    m.bindPopup(`<b>${esc(A(o))}</b><br>${esc(M(o))}<br>${esc(o.bags||'')}`);
+    m.on('click',()=>m.openPopup());
+    volMarkers.push(m);
+  });
+  if(volMarkers.length&&S.geo){
+    const g=L.latLngBounds(volMarkers.map(m=>m.getLatLng()));
+    g.extend([S.geo.lat,S.geo.lng]);
+    try{mapVol.fitBounds(g,{padding:[30,30],maxZoom:16})}catch(e){}
+  }
+}
+
+/* живая геопозиция волонтёра: пишем координаты в заявку, пока приложение открыто */
+function startGeoTrack(){
+  if(ROLE!=='vo'||!S.activeJob||!db||!navigator.geolocation) return;
+  if(geoWatch!=null) return;
+  geoWatch=navigator.geolocation.watchPosition(p=>{
+    const lat=p.coords.latitude, lng=p.coords.longitude;
+    S.geo={lat,lng}; S.geoState='ok';
+    if(S.activeJob){
+      db.ref('orders/'+S.activeJob.id).update({volunteerLat:lat,volunteerLng:lng,
+        volunteerGeoAt:Date.now()}).catch(()=>{});
+    }
+    if(db) db.ref('users/'+uid+'/geo').set({lat,lng,at:Date.now()}).catch(()=>{});
+  },()=>{},{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
+}
+function stopGeoTrack(){
+  if(geoWatch!=null){try{navigator.geolocation.clearWatch(geoWatch)}catch(e){} geoWatch=null}
+}
 
 function toast(m){const t=$("#toast");t.textContent=(S.set.lang==="uz"&&uzText(m))||m;t.classList.add('on');
   clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('on'),2600)}
@@ -1650,6 +1894,11 @@ function loadProfile(attempt){
 }
 function start(){
   S.ready=true;
+  const dp=P.get('view')||startParam||'';
+  if(dp==='live'&&ROLE==='cl') S.view='live';
+  else if(dp==='work'&&ROLE==='vo') S.view='work';
+  else if(dp==='new'&&ROLE==='cl') S.view='new';
+  else if(dp==='prof') S.view='prof';
   if(ROLE==='vo'){
     db.ref('users/'+uid+'/onair').once('value').then(s=>{
       if(s.exists()) S.onair=!!s.val();
@@ -1904,6 +2153,20 @@ function askGeo(){
          // волонтёру координаты нужны, чтобы считать расстояние до заявок
          if(ROLE==='vo'&&db) db.ref('users/'+uid+'/geo').set({...S.geo,at:Date.now()}).catch(()=>{});
          render(); toast('Местоположение определено') },
+    ()=>{ S.geoState='denied'; render(); toast('Без геопозиции расстояние показать не сможем') },
+    {enableHighAccuracy:true,timeout:9000,maximumAge:120000}
+  );
+}
+function askGeoAndCenter(){
+  if(!navigator.geolocation){ toast('Геопозиция недоступна'); return }
+  S.geoState='asking'; render();
+  navigator.geolocation.getCurrentPosition(
+    p=>{
+      S.geo={lat:p.coords.latitude,lng:p.coords.longitude}; S.geoState='ok';
+      if(ROLE==='vo'&&db) db.ref('users/'+uid+'/geo').set({...S.geo,at:Date.now()}).catch(()=>{});
+      if(mapPick) mapPick.setView([S.geo.lat,S.geo.lng],17);
+      render(); toast('Местоположение определено');
+    },
     ()=>{ S.geoState='denied'; render(); toast('Без геопозиции расстояние показать не сможем') },
     {enableHighAccuracy:true,timeout:9000,maximumAge:120000}
   );
