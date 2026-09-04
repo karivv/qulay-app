@@ -249,6 +249,26 @@ input,textarea{font-family:inherit}
 .q-lb .x{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:14px;
   padding:12px 22px;font-size:14.5px;font-weight:700}
 
+/* лист «Связаться»: звонок + готовые фразы */
+.q-sheet{position:fixed;inset:0;z-index:98;background:rgba(6,20,13,.55);
+  display:flex;align-items:flex-end;justify-content:center}
+.q-sheet .in{background:var(--card);width:100%;max-width:520px;border-radius:26px 26px 0 0;
+  padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:82vh;overflow:auto}
+.q-sheet .grab{width:38px;height:4px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+.q-sheet h4{font-size:16px;font-weight:800;margin:0 0 3px}
+.q-sheet .sub{font-size:12.5px;color:var(--soft);margin-bottom:14px}
+.q-sheet .big{display:flex;align-items:center;gap:12px;width:100%;border:none;text-align:left;
+  background:var(--g);color:#fff;border-radius:18px;padding:14px 16px;font-size:15.5px;
+  font-weight:700;margin-bottom:8px;text-decoration:none}
+.q-sheet .big .ic{font-size:20px}
+.q-sheet .big small{display:block;font-size:12px;font-weight:600;opacity:.85;margin-top:1px}
+.q-sheet .ph{display:flex;align-items:center;gap:12px;width:100%;border:1px solid var(--line);
+  text-align:left;background:var(--bg);color:var(--ink);border-radius:16px;padding:13px 15px;
+  font-size:14.5px;font-weight:600;margin-bottom:7px}
+.q-sheet .ph:active{background:var(--gbg)}
+.q-sheet .x{border:none;background:var(--bg);color:var(--soft);border-radius:16px;
+  padding:13px;font-size:14.5px;font-weight:700;width:100%;margin-top:6px}
+
 .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);
   background:var(--inv-bg);color:var(--inv-ink);padding:12px 18px;border-radius:14px;
   font-size:13.5px;font-weight:600;opacity:0;pointer-events:none;transition:.22s;z-index:95;
@@ -434,6 +454,8 @@ const S={
   geo:null, geoState:'idle',   /* idle | asking | ok | denied | unsupported */
   from:'home',                 /* откуда пришли в «Помощь» — туда и вернём */
   lb:null,                     /* открытое на весь экран фото */
+  sheet:false,                 /* открыт лист «Связаться» */
+  kg:5,                        /* примерный вес, который волонтёр ставит при закрытии */
   myPhoto:undefined,           /* своё фото волонтёра, undefined — ещё не читали */
   /* язык при первом запуске берём из Telegram: у узбекоязычных он и должен
      открыться на узбекском, а не заставлять искать настройку */
@@ -481,6 +503,13 @@ const VSTEP=[['Идёте к дому','Житель видит, что вы в 
              ['Пакет у вас','Донесите до контейнера'],
              ['Готово','Очки начислены']];
 const LEVELS=[[0,'Новичок'],[100,'Активный волонтёр'],[300,'Опытный волонтёр'],[600,'Герой квартала']];
+/* Вес ставит волонтёр на глаз при закрытии — точные весы никто носить не будет,
+   а порядок величины нужен, чтобы счётчик дома не считал пакет и мешок одинаково. */
+const KG=[[2,'до 3 кг'],[5,'3–7 кг'],[10,'7–15 кг'],[20,'больше 15']];
+/* Сумма реального веса вместо «заявок × 3»: у старых заявок веса нет —
+   для них берём прежние 3 кг, иначе счётчик просел бы задним числом. */
+const kgOf=o=>o&&o.kg!=null?o.kg:3;
+const kgSum=list=>list.reduce((s,o)=>s+kgOf(o),0);
 /* названия совпадают с условиями: «Ночной рейс» за пять заявок только сбивал с толку */
 const BADGES=[
   {e:'🌱',n:'Первая заявка',got:p=>p.done>=1},
@@ -499,6 +528,10 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const A=o=>`Дом ${o&&o.house||'—'}, кв. ${o&&o.flat||'—'}`;
 const M=o=>`Подъезд ${o&&o.entrance||'—'}, этаж ${o&&o.floor||'—'}`;
+/* До взятия заявки волонтёр видит только дом: квартира, подъезд и этаж —
+   это адрес конкретного человека, и он не должен висеть в общем списке
+   у всех волонтёров района. Открывается после claim(). */
+const Ashort=o=>`Дом ${o&&o.house||'—'}`;
 const st5=n=>'★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n);
 function plural(n,one,few,many){
   const a=Math.abs(n)%100, b=a%10;
@@ -526,6 +559,21 @@ function futureTimes(){
 }
 /* когда забрать — короткая бирка для карточки заявки */
 const whenTag=o=>o&&o.when&&o.when!=='сейчас' ? o.when.replace('сегодня в ','к ') : 'сейчас';
+/* Заявка «к 18:00» раньше висела у волонтёров с момента создания: её могли
+   взять в полдень, и житель полдня видел «волонтёр в пути». Показываем такие
+   заявки только когда время подходит. */
+const LEAD_MIN=40;
+function dueAt(o){
+  if(!o||!o.when||o.when==='сейчас') return null;
+  const m=/(\d{1,2}):(\d{2})/.exec(o.when); if(!m) return null;
+  const d=new Date(o.createdAt||Date.now());
+  d.setHours(+m[1],+m[2],0,0);
+  return d.getTime();
+}
+function isDue(o){
+  const t=dueAt(o); if(t==null) return true;      // «сейчас» — всегда актуальна
+  return Date.now()>=t-LEAD_MIN*60000;
+}
 /* средняя оценка любого участника из таблицы лидеров */
 function avgOf(id){ const b=S.board[id]; return b&&b.ratingCount ? b.ratingSum/b.ratingCount : 0 }
 const fmtAvg=a=>a?a.toFixed(1).replace('.',','):'—';
@@ -908,7 +956,7 @@ function profileView(){
            <div class="q-st"><div class="n">${r?'#'+r.pos:'—'}</div><div class="c">место в районе</div></div>`
         : `<div class="q-st"><div class="n">${myOrders().filter(o=>o.status==='done').length}</div>
              <div class="c">раз вынесли за вас</div></div>
-           <div class="q-st"><div class="n">${myOrders().filter(o=>o.status==='done').length*3}<small>кг</small></div>
+           <div class="q-st"><div class="n">${kgSum(myOrders().filter(o=>o.status==="done"))}<small>кг</small></div>
              <div class="c">не осталось у подъезда</div></div>
            <div class="q-st"><div class="n">${r?'#'+r.pos:'—'}</div><div class="c">место в доме</div></div>`}
     </div>
@@ -1056,7 +1104,7 @@ function cHome(){
     ${rateCard()}
     <div class="q-stats">
       <div class="q-st"><div class="n">${done.length}</div><div class="c">раз вынесли за вас</div></div>
-      <div class="q-st"><div class="n">≈${done.length*3}<small>кг</small></div>
+      <div class="q-st"><div class="n">≈${kgSum(done)}<small>кг</small></div>
         <div class="c">не осталось у подъезда</div></div>
       <div class="q-st"><div class="n">${r?'#'+r.pos:'—'}</div><div class="c">место в вашем доме</div></div></div>
     ${!me.house?`<p class="q-help">Укажите дом в профиле, чтобы участвовать в рейтинге соседей.</p>`:''}
@@ -1141,7 +1189,7 @@ function cLive(){
           <div class="rt">${avgOf(o.volunteerId)
             ? `<b>★ ${fmtAvg(avgOf(o.volunteerId))}</b> · ${(S.board[o.volunteerId]||{}).ordersCompleted||0} ${plural((S.board[o.volunteerId]||{}).ordersCompleted||0,'заявка','заявки','заявок')}`
             : 'волонтёр Qulay · новичок'}</div></div>
-        ${o.volunteerPhone?`<a class="q-call" href="${telHref(o.volunteerPhone)}" aria-label="Позвонить">✆</a>`:''}</div>`):''}</div>
+        ${o.volunteerPhone?`<button class="q-call" onclick="openContact()" aria-label="Связаться с волонтёром">📞</button>`:''}</div>`):''}</div>
     ${ph===0&&S.noVol?`<div class="q-card"><div class="q-row"><div class="q-ic sun">⏳</div>
       <div><div class="a">Что можно сделать</div>
       <div class="b">Заявка никуда не пропала — она висит у всех волонтёров района.</div></div></div>
@@ -1170,7 +1218,7 @@ function cHist(){
   const list=myOrders().filter(o=>o.status==='done');
   return wrap(`<div class="pad">
     <h3 class="q-h2">История</h3>
-    <p class="q-help">Всего ${list.length} ${plural(list.length,"заявка","заявки","заявок")} · ≈${list.length*3} кг не осталось у подъезда</p>
+    <p class="q-help">Всего ${list.length} ${plural(list.length,"заявка","заявки","заявок")} · ≈${kgSum(list)} кг не осталось у подъезда</p>
     ${list.length?list.map(o=>`<div class="q-card">
       <div class="q-row"><div class="q-ic">✓</div>
         <div style="flex:1"><div class="a">${esc(A(o))}</div>
@@ -1223,14 +1271,17 @@ function cFin(){
 
 /* ================= экраны волонтёра ================= */
 function vHome(){
-  let list=openOrders(); const v=vStats();
+  const all=openOrders(); const v=vStats();
+  let list=all.filter(isDue), later=all.filter(o=>!isDue(o));
   // когда знаем, где волонтёр, ближние заявки идут первыми
   if(S.geo) list=list.slice().sort((a,b)=>((distM(S.geo,a)??1e9)-(distM(S.geo,b)??1e9)));
+  later=later.slice().sort((a,b)=>(dueAt(a)||0)-(dueAt(b)||0));
   const r=rankIn('volunteer','district',me.district);
   return wrap(`<div class="pad">
     <div class="q-top">${logo('волонтёр')}<button class="q-ava" onclick="go('prof')">${esc(MYNAME()[0])}</button></div>
     <h3 class="q-hi">Салом, ${esc(me.name)}<span>${list.length
       ? `${list.length} ${plural(list.length,'заявка ждёт','заявки ждут','заявок ждут')} рядом`
+      : later.length ? `${later.length} ${plural(later.length,'заявка','заявки','заявок')} на потом`
       :'Заявок рядом пока нет'}</span></h3>
     ${S.activeJob?`<button class="q-hero" onclick="go('work')">${LEAF}
         <span class="k">${VSTEP[Math.max(0,phaseOf(S.activeJob)-1)][0]}</span>
@@ -1248,18 +1299,27 @@ function vHome(){
       const m=distM(S.geo,o), far=m!=null&&m>RADIUS_M[S.set.radius], sched=whenTag(o)!=='сейчас';
       return `<div class="q-card"${far?' style="opacity:.55"':''}>
       <div class="q-row"><div class="q-ic ${sched?'':'sun'}">${sched?'🕓':'📍'}</div>
-        <div style="flex:1"><div class="a">${esc(A(o))}</div>
-        <div class="b">${esc(M(o))} · ${when(o.createdAt)}</div>
+        <div style="flex:1"><div class="a">${esc(Ashort(o))}</div>
+        <div class="b">${when(o.createdAt)}</div>
         ${m!=null?`<div class="b">${distLabel(m)} от вас${far?' · дальше вашего радиуса':''}</div>`:''}</div></div>
       <div class="q-tags"><span class="q-tag ${sched?'sun':'g'}">${sched?esc(whenTag(o)):'сейчас'}</span>
-        ${o.bags?`<span class="q-tag">${esc(o.bags)}</span>`:''}
-        ${o.clientName?`<span class="q-tag">${esc(o.clientName)}</span>`:''}</div>
-      ${o.note?`<div class="b" style="font-size:13px;color:var(--soft);margin-top:10px">💬 ${esc(o.note)}</div>`:''}
+        ${o.bags?`<span class="q-tag">${esc(o.bags)}</span>`:''}</div>
+      <div class="b" style="font-size:12.5px;color:var(--mut);margin-top:9px">
+        🔒 Квартира и подъезд откроются, когда возьмёте заявку</div>
       <button class="q-btn" style="margin-top:13px" ${S.activeJob?'disabled':''}
         onclick="claim('${o.id}')">${S.activeJob?'Сначала закройте текущую':'Взять заявку'}</button>
     </div>`}).join('')
     :`<div class="q-empty"><div class="e">🌿</div><div class="t">Сейчас всё чисто</div>
-      <div class="b">Как только житель оставит заявку, она появится здесь</div></div>`}
+      <div class="b">${later.length?'Ближайшие заявки — ниже, к назначенному времени'
+        :'Как только житель оставит заявку, она появится здесь'}</div></div>`}
+    ${later.length?`<div class="q-lbl">Позже сегодня</div>
+      <p class="q-help">Откроются для взятия за ${LEAD_MIN} минут до времени —
+        чтобы житель не ждал волонтёра полдня.</p>
+      ${later.map(o=>`<div class="q-card" style="opacity:.6">
+        <div class="q-row"><div class="q-ic">🕓</div>
+          <div style="flex:1"><div class="a">${esc(Ashort(o))}</div>
+          <div class="b">${esc(whenTag(o))}${o.bags?' · '+esc(o.bags):''}</div></div></div>
+      </div>`).join('')}`:''}
     <div class="q-lbl">Ваш прогресс</div>
     <div class="q-lvl">${ring(v.pts)}
       <div style="flex:1"><div class="t">${lvl(v.pts)}</div>
@@ -1285,8 +1345,10 @@ function vWork(){
       <div class="q-who"><div class="ph">${esc((o.clientName||'Ж')[0])}</div>
         <div style="flex:1"><div class="nm">${esc(o.clientName||'Житель')}</div>
           <div class="rt">${esc(M(o))}</div></div>
-        ${o.clientPhone?`<a class="q-call" href="${telHref(o.clientPhone)}" aria-label="Позвонить">✆</a>`:''}</div></div>
+        ${o.clientPhone?`<button class="q-call" onclick="openContact()" aria-label="Связаться с жителем">📞</button>`:''}</div></div>
     ${ph<4?`<div id="map-live" class="q-leaflet"></div>`:''}
+    ${ph<3&&o.lat!=null?`<button class="q-btn sm ghost" style="margin-top:10px"
+      onclick="route()">🧭 Проложить маршрут</button>`:''}
     ${o.note?`<div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">💬</div>
       <div><div class="a" style="font-size:14px">От жителя</div><div class="b">${esc(o.note)}</div></div></div></div>`:''}
     <div class="q-lbl">Ваши шаги</div>
@@ -1300,7 +1362,11 @@ function vWork(){
       <div class="e">${S.photoURL?'✅':'📷'}</div>
       <div class="t">${S.photoURL?'Фото прикреплено':'Фото у контейнера'}</div>
       <div class="b">${S.photoURL?'Можно закрывать заявку':'Подтверждает, что мусор доехал'}</div>
-      ${S.photoURL?`<img src="${S.photoURL}" alt="">`:''}</label>`:''}
+      ${S.photoURL?`<img src="${S.photoURL}" alt="">`:''}</label>
+    <div class="q-lbl">Сколько получилось</div>
+    <p class="q-help">На глаз — это идёт в общий счётчик дома и в вашу статистику.</p>
+    <div class="q-seg">${KG.map(k=>
+      `<button aria-pressed="${S.kg===k[0]}" onclick="setKg(${k[0]})">${k[1]}</button>`).join('')}</div>`:''}
     <div class="push">
       ${ph===1?`<button class="q-btn" onclick="setStatus('arrived')">Я на месте</button>`
         :ph===2?`<button class="q-btn" onclick="setStatus('picked')">Пакет забрал</button>`
@@ -1308,9 +1374,7 @@ function vWork(){
            ${S.photoURL?'Закрыть заявку':'Сначала фото'}</button>`}
       ${ph<3?`<button class="q-btn danger" style="margin-top:9px" onclick="giveUp()">
         Не смогу выполнить</button>`:''}
-      <div class="q-pair" style="margin-top:9px">
-        ${o.lat!=null?`<button class="q-btn sm ghost" onclick="maps()">Карта</button>`:''}
-        <button class="q-btn sm danger" onclick="reportIssue()">Что-то не так</button></div>
+      <button class="q-btn sm danger" style="margin-top:9px" onclick="reportIssue()">Что-то не так</button>
     </div>
   </div>`,'home');
 }
@@ -1705,7 +1769,7 @@ function render(){
   killMap(mapPick);mapPick=null; killMap(mapLive);mapLive=null;liveMarker=null;clientMarker=null;
   killMap(mapVol);mapVol=null;volMarkers=[];
   if(ROLE==='vo'?!S.activeJob:!S.myOrder) stopGeoTrack();
-  $('#app').innerHTML=(V[S.view]||V.home)()+lbView();
+  $('#app').innerHTML=(V[S.view]||V.home)()+lbView()+contactView();
   localize($('#app'));
   syncBack();
   setTimeout(afterRender,60);
@@ -1720,6 +1784,57 @@ function lbView(){
 }
 function showImg(src,cap){ S.lb={src,cap:cap||''}; render() }
 function closeLb(){ S.lb=null; render() }
+
+/* ===== «Связаться»: звонок + готовые фразы =====
+   Фразы дублируют то, ради чего обычно звонят. Звонок остаётся, но перестаёт
+   быть единственным способом — многим проще нажать, чем говорить. */
+const PHRASES={
+  cl:['Код домофона — напишу в чате','Лифт не работает','Пакет уже у двери',
+      'Выйду через пару минут','Домофон не работает, позвоните'],
+  vo:['Подхожу, буду через пару минут','Я у подъезда','Не могу открыть дверь',
+      'Задержусь минут на десять','Пакет забрал, несу к контейнеру']
+};
+function contactSide(){
+  const o=ROLE==='cl'?S.myOrder:S.activeJob;
+  if(!o) return null;
+  return ROLE==='cl'
+    ? {id:o.volunteerId,name:o.volunteerName||'Волонтёр',phone:o.volunteerPhone}
+    : {id:o.clientId,name:o.clientName||'Житель',phone:o.clientPhone};
+}
+/* Маршрут до заявки. В Ташкенте у волонтёров почти всегда Яндекс.Карты —
+   web-ссылка сама открывает приложение, если оно стоит. */
+function route(){
+  const o=S.activeJob;
+  if(!o||o.lat==null){ toast('У этой заявки нет точки на карте'); return }
+  openLink(`https://yandex.ru/maps/?rtext=~${o.lat},${o.lng}&rtt=pd`);
+}
+function setKg(v){ S.kg=v; hap('light'); render() }
+function openContact(){ S.sheet=true; render() }
+function closeContact(){ S.sheet=false; render() }
+function contactView(){
+  if(!S.sheet) return '';
+  const p=contactSide(); if(!p) return '';
+  const list=PHRASES[ROLE]||[];
+  return `<div class="q-sheet" onclick="if(event.target===this)closeContact()"><div class="in">
+    <div class="grab"></div>
+    <h4>${esc(p.name)}</h4>
+    <div class="sub">Позвоните или отправьте готовую фразу — она придёт в чат Qulay</div>
+    ${p.phone?`<a class="big" href="${telHref(p.phone)}">
+      <span class="ic">📞</span><span>Позвонить<small>${esc(fmtPhone(p.phone))}</small></span></a>`:''}
+    ${list.map(t=>`<button class="ph" onclick="sendPhrase(${JSON.stringify(t).replace(/"/g,'&quot;')})">
+      <span>💬</span><span>${esc(t)}</span></button>`).join('')}
+    <button class="x" onclick="closeContact()">Закрыть</button>
+  </div></div>`;
+}
+function sendPhrase(text){
+  const p=contactSide(); const o=ROLE==='cl'?S.myOrder:S.activeJob;
+  if(!p||!p.id||!o||!db){ toast('Нет связи с сервером'); return }
+  db.ref('orderMsgs').push({
+    orderId:o.id, toUid:String(p.id), fromUid:uid, fromName:MYNAME(),
+    fromRole:ROLE==='cl'?'client':'volunteer', text, at:Date.now()
+  }).then(()=>{ hap('success'); closeContact(); toast('Отправлено') })
+   .catch(()=>toast('Не удалось отправить'));
+}
 /* Пока волонтёр в пути, двигаем точку и минуты точечно — без пересборки
    всего экрана: полная перерисовка сбрасывает прокрутку и тормозит. */
 function tickLive(){
@@ -2038,7 +2153,7 @@ function buzz(){ try{ if(navigator.vibrate) navigator.vibrate([200,100,200]) }ca
 /* ================= действия ================= */
 function go(v){
   if(v==='help'&&S.view!=='help') S.from=S.view;
-  S.view=v; S.lb=null; S.rating=0; S.comment=''; S.reasons=[]; render();
+  S.view=v; S.lb=null; S.sheet=false; S.rating=0; S.comment=''; S.reasons=[]; render();
 }
 function setMode(m){S.mode=m;render()}
 function setTime(t){S.timeV=t;render()}
@@ -2353,7 +2468,7 @@ function setStatus(s){
   const upd={status:s};
   if(s==='arrived') upd.arrivedAt=Date.now();
   if(s==='picked') upd.pickedAt=Date.now();
-  if(s==='done'){ upd.doneAt=Date.now(); upd.photo=!!S.photoURL }
+  if(s==='done'){ upd.doneAt=Date.now(); upd.photo=!!S.photoURL; upd.kg=S.kg }
   db.ref('orders/'+o.id).update(upd).then(()=>{
     hap(s==='done'?'success':'medium');
     if(s==='done'){
@@ -2362,7 +2477,7 @@ function setStatus(s){
       if(S.photoURL) db.ref('orderPhotos/'+o.id).set({
         img:S.photoURL, at:Date.now(), by:uid
       }).catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
-      S.finOrder={...o,...upd}; S.activeJob=null; S.photoURL=null;
+      S.finOrder={...o,...upd}; S.activeJob=null; S.photoURL=null; S.kg=5;
       S.view='fin'; render();
     }
   }).catch(()=>toast('Не удалось обновить статус'));
