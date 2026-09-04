@@ -1103,7 +1103,23 @@ function godPanel(){
       <p class="q-help">Сдвигает время только у вас в приложении — чтобы увидеть
         закрытие в ${CLOSE_H}:00 и «Позже сегодня», не дожидаясь вечера.
         Бот живёт по настоящему времени и заявку закроет по нему.</p>
+    </div>
+    <div class="q-card flat"><div class="q-row">
+      <div class="q-ic sm ${uzMissing.size?'sun':''}">🇺🇿</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">Без перевода: ${uzMissing.size}</div>
+      <div class="b">${S.set.lang==='uz'
+        ? 'Пройдите по экранам — список пополняется на ходу'
+        : 'Включите узбекский в настройках, тогда начнёт считать'}</div></div></div>
+      ${uzMissing.size?`<div class="q-help" style="margin-top:10px;max-height:160px;overflow:auto">
+        ${[...uzMissing].slice(0,60).map(s=>`• ${esc(s)}`).join('<br>')}</div>
+        <button class="q-btn sm ghost" style="margin-top:10px" onclick="copyMissing()">
+          Скопировать список</button>`:''}
     </div>`;
+}
+function copyMissing(){
+  const t=[...uzMissing].join('\n');
+  try{ navigator.clipboard.writeText(t); toast('Список скопирован') }
+  catch(e){ toast('Не удалось скопировать') }
 }
 function shiftTime(h){
   tShift = h===0 ? 0 : tShift+h;
@@ -1812,6 +1828,15 @@ const UZ_RE=[
   [/^(\d+) заявк\S*$/,"$1 ta buyurtma"],
   [/^Фото у контейнера · (.+)$/,"Konteyner oldida rasm · $1"],
 ];
+/* Словарь молчит, когда строки в нём нет: текст просто остаётся русским, и
+   заметить это можно только глазами на каждом экране. Копим пропущенное —
+   god-панель показывает список, и его видно сразу, а не через месяц. */
+const uzMissing=new Set();
+function noteMissing(s){
+  const k=String(s).replace(/\s+/g,' ').trim();
+  if(!k||k.length<2||!/[а-яА-ЯёЁ]/.test(k)) return;   // цифры и латиницу не считаем
+  uzMissing.add(k);
+}
 function uzText(s){
   // В шаблонах длинные фразы разбиты на строки, поэтому в тексте попадаются
   // переносы и отступы. Схлопываем пробелы перед поиском, но возвращаем
@@ -1829,7 +1854,8 @@ function localize(root){
   try{
     const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
     const nodes=[]; while(w.nextNode()) nodes.push(w.currentNode);
-    nodes.forEach(n=>{ const v=uzText(n.nodeValue); if(v!=null) n.nodeValue=v });
+    nodes.forEach(n=>{ const v=uzText(n.nodeValue);
+      if(v!=null) n.nodeValue=v; else noteMissing(n.nodeValue) });
     root.querySelectorAll('[placeholder]').forEach(el=>{
       const v=UZ[el.getAttribute('placeholder')]; if(v) el.setAttribute('placeholder',v);
     });
