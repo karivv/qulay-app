@@ -276,6 +276,21 @@ input,textarea{font-family:inherit}
 .q-sheet .ph:active{background:var(--gbg)}
 .q-sheet .x{border:none;background:var(--bg);color:var(--soft);border-radius:16px;
   padding:13px;font-size:14.5px;font-weight:700;width:100%;margin-top:6px}
+/* звонок + копирование номера: на iPhone tel: не срабатывает, и буфер —
+   единственный способ отдать номер человеку */
+.q-callrow{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
+.q-callrow .big{flex:1;margin-bottom:0}
+.q-callrow .cp{flex:none;width:52px;border:1px solid var(--line);background:var(--bg);
+  color:var(--soft);border-radius:18px;font-size:19px}
+.q-callrow .cp:active{background:var(--gbg)}
+/* строка ввода своего сообщения */
+.q-send{display:flex;gap:8px;margin-bottom:4px}
+.q-send input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);
+  color:var(--ink);border-radius:16px;padding:13px 15px;font-size:15px;font-family:inherit}
+.q-send input:focus{outline:none;border-color:var(--g)}
+.q-send button{flex:none;width:52px;border:none;background:var(--g);color:#fff;
+  border-radius:16px;font-size:17px}
+.q-send button:active{opacity:.85}
 
 .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);
   background:var(--inv-bg);color:var(--inv-ink);padding:12px 18px;border-radius:14px;
@@ -465,6 +480,7 @@ const S={
   sheet:false,                 /* открыт лист «Связаться» */
   kg:5,                        /* примерный вес, который волонтёр ставит при закрытии */
   botName:'',                  /* имя бота из базы — для ссылки-приглашения */
+  draft:'',                    /* недописанное сообщение — переживает перерисовку */
   myPhoto:undefined,           /* своё фото волонтёра, undefined — ещё не читали */
   /* язык при первом запуске берём из Telegram: у узбекоязычных он и должен
      открыться на узбекском, а не заставлять искать настройку */
@@ -1090,7 +1106,7 @@ function settingsView(){
 function godPanel(){
   const n=nowD(), open=isOpenNow();
   const hh=String(n.getHours()).padStart(2,'0'), mm=String(n.getMinutes()).padStart(2,'0');
-  return `<div class="q-lbl">Проверка</div>
+  return `<div data-nouz><div class="q-lbl">Проверка</div>
     <div class="q-card flat"><div class="q-row"><div class="q-ic sm ${open?'':'sun'}">🕓</div>
       <div style="flex:1"><div class="a" style="font-size:14px">Время в приложении: ${hh}:${mm}</div>
       <div class="b">${open?'Сервис открыт':'Сервис закрыт'}${tShift?` · сдвиг ${tShift>0?'+':''}${tShift} ч`:''}</div>
@@ -1113,9 +1129,12 @@ function godPanel(){
       ${uzMissing.size?`<div class="q-help" style="margin-top:10px;max-height:160px;overflow:auto">
         ${[...uzMissing].slice(0,60).map(s=>`• ${esc(s)}`).join('<br>')}</div>
         <button class="q-btn sm ghost" style="margin-top:10px" onclick="copyMissing()">
-          Скопировать список</button>`:''}
-    </div>`;
+          Скопировать список</button>
+        <button class="q-btn sm ghost" style="margin-top:8px" onclick="clearMissing()">
+          Очистить</button>`:''}
+    </div></div>`;
 }
+function clearMissing(){ uzMissing.clear(); render(); toast('Список очищен') }
 function copyMissing(){
   const t=[...uzMissing].join('\n');
   try{ navigator.clipboard.writeText(t); toast('Список скопирован') }
@@ -1835,6 +1854,9 @@ const uzMissing=new Set();
 function noteMissing(s){
   const k=String(s).replace(/\s+/g,' ').trim();
   if(!k||k.length<2||!/[а-яА-ЯёЁ]/.test(k)) return;   // цифры и латиницу не считаем
+  // Имена, телефоны, адреса и даты переводить не нужно — это данные, а не
+  // интерфейс. Без этого список забивался мусором вроде «+998 90 ... · житель».
+  if(/\d{2}[:.]\d{2}|\+998|\d{1,2} (январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)/i.test(k)) return;
   uzMissing.add(k);
 }
 function uzText(s){
@@ -1855,7 +1877,11 @@ function localize(root){
     const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
     const nodes=[]; while(w.nextNode()) nodes.push(w.currentNode);
     nodes.forEach(n=>{ const v=uzText(n.nodeValue);
-      if(v!=null) n.nodeValue=v; else noteMissing(n.nodeValue) });
+      if(v!=null){ n.nodeValue=v; return }
+      // сама панель проверки показывает список пропущенного — не считаем её,
+      // иначе она попадает в собственный список и растёт с каждым заходом
+      if(n.parentElement&&n.parentElement.closest('[data-nouz]')) return;
+      noteMissing(n.nodeValue) });
     root.querySelectorAll('[placeholder]').forEach(el=>{
       const v=UZ[el.getAttribute('placeholder')]; if(v) el.setAttribute('placeholder',v);
     });
@@ -1930,16 +1956,41 @@ function contactView(){
   if(!S.sheet) return '';
   const p=contactSide(); if(!p) return '';
   const list=PHRASES[ROLE]||[];
+  const num=p.phone?'+998'+phoneDigits(p.phone):'';
   return `<div class="q-sheet" onclick="if(event.target===this)closeContact()"><div class="in">
     <div class="grab"></div>
     <h4>${esc(p.name)}</h4>
-    <div class="sub">Позвоните или отправьте готовую фразу — она придёт в чат Qulay</div>
-    ${p.phone?`<a class="big" href="${telHref(p.phone)}" onclick="return dial('${esc(p.phone)}',event)">
-      <span class="ic">📞</span><span>Позвонить<small>${esc(fmtPhone(p.phone))}</small></span></a>`:''}
+    <div class="sub">Напишите или позвоните — сообщение придёт в чат Qulay</div>
+    ${num?`<div class="q-callrow">
+      <a class="big" href="tel:${num}" onclick="return dial('${esc(p.phone)}',event)">
+        <span class="ic">📞</span><span>Позвонить<small>${esc(fmtPhone(p.phone))}</small></span></a>
+      <button class="cp" onclick="copyNum('${esc(p.phone)}')" aria-label="Скопировать номер">⧉</button>
+    </div>`:''}
+    <div class="q-send">
+      <input id="c_msg" placeholder="Написать сообщение…" autocomplete="off"
+        value="${esc(S.draft||'')}" oninput="S.draft=this.value"
+        onkeydown="if(event.key==='Enter')sendTyped()">
+      <button onclick="sendTyped()" aria-label="Отправить">➤</button>
+    </div>
+    <div class="q-lbl" style="margin:14px 0 8px">Быстрые фразы</div>
     ${list.map(t=>`<button class="ph" onclick="sendPhrase(${JSON.stringify(t).replace(/"/g,'&quot;')})">
       <span>💬</span><span>${esc(t)}</span></button>`).join('')}
     <button class="x" onclick="closeContact()">Закрыть</button>
   </div></div>`;
+}
+function sendTyped(){
+  const el=document.getElementById('c_msg'); if(!el) return;
+  const t=(el.value||'').trim();
+  if(!t){ toast('Напишите сообщение'); return }
+  if(t.length>500){ toast('Слишком длинно'); return }
+  sendPhrase(t);
+}
+/* На iPhone Telegram глотает tel: наглухо — там единственный рабочий путь
+   отдать номер человеку в буфер, чтобы он вставил его в звонилку. */
+function copyNum(phone){
+  const num='+998'+phoneDigits(phone);
+  try{ navigator.clipboard.writeText(num); toast('Номер скопирован: '+num) }
+  catch(e){ toast(num) }
 }
 /* Telegram по-разному относится к tel: — в одних клиентах ссылка открывает
    набор номера, в других её молча глотает WebView. Поэтому пробуем несколько
@@ -1962,8 +2013,8 @@ function sendPhrase(text){
   db.ref('orderMsgs').push({
     orderId:o.id, toUid:String(p.id), fromUid:uid, fromName:MYNAME(),
     fromRole:ROLE==='cl'?'client':'volunteer', text, at:Date.now()
-  }).then(()=>{ hap('success'); closeContact(); toast('Отправлено') })
-   .catch(()=>toast('Не удалось отправить'));
+  }).then(()=>{ hap('success'); S.draft=''; closeContact(); toast('Отправлено') })
+   .catch(()=>toast('Не удалось отправить — проверьте правила Firebase'));
 }
 /* Пока волонтёр в пути, двигаем точку и минуты точечно — без пересборки
    всего экрана: полная перерисовка сбрасывает прокрутку и тормозит. */
