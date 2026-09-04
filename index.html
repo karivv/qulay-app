@@ -72,6 +72,9 @@ input,textarea{font-family:inherit}
   background:var(--grad);color:#fff;border-radius:28px 28px 28px 10px;padding:21px;
   display:flex;flex-direction:column;gap:6px;box-shadow:var(--shl);transition:transform .15s}
 .q-hero:active{transform:scale(.985)}
+/* вне часов работы блок остаётся на месте, но перестаёт быть кнопкой */
+.q-hero.closed{background:linear-gradient(145deg,#5F7368,#3E4F46);box-shadow:var(--sh)}
+.q-hero.closed:active{transform:none}
 .q-hero .leaf{position:absolute;right:-26px;top:-30px;width:150px;height:150px;opacity:.13;
   pointer-events:none}
 .q-hero .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.88}
@@ -470,6 +473,20 @@ if(P.get('lang')==='uz'||P.get('lang')==='ru') S.set.lang=P.get('lang');
 
 const BAGS=['Один пакет','Два-три пакета','Крупный мусор','Стекло / банки'];
 const TIMES=['14:00','16:00','18:00','20:00'];
+/* Часы работы сервиса. Заявку, которую до закрытия никто не взял, бот отменяет
+   с извинением: держать её до утра нечестно — житель всю ночь думает, что идут.
+   Уже взятую заявку закрытие не трогает, волонтёр спокойно доводит её до конца. */
+const OPEN_H=7, CLOSE_H=21;
+function isOpenNow(d){
+  const h=(d||new Date()).getHours();
+  return h>=OPEN_H&&h<CLOSE_H;
+}
+const openHoursText=()=>`Сервис работает с ${OPEN_H}:00 до ${CLOSE_H}:00`;
+/* последний час перед закрытием — предупреждаем, что заявка может не успеть */
+function closingSoon(){
+  const n=new Date();
+  return n.getHours()===CLOSE_H-1;
+}
 const RADII=['500 м','1 км','3 км'];
 const RADIUS_M={'500 м':500,'1 км':1000,'3 км':3000};
 const DAY_LIMIT=3;
@@ -555,7 +572,9 @@ function dt(d){return new Date(d).toLocaleString('ru',
 /* слоты «ко времени», до которых ещё можно успеть: прошедшие не предлагаем */
 function futureTimes(){
   const n=new Date(), cur=n.getHours()*60+n.getMinutes()+20;
-  return TIMES.filter(t=>{ const [h,m]=t.split(':').map(Number); return h*60+m>cur });
+  // позже закрытия записывать не на что — волонтёров в это время уже нет
+  return TIMES.filter(t=>{ const [h,m]=t.split(':').map(Number);
+    return h*60+m>cur && h<CLOSE_H });
 }
 /* когда забрать — короткая бирка для карточки заявки */
 const whenTag=o=>o&&o.when&&o.when!=='сейчас' ? o.when.replace('сегодня в ','к ') : 'сейчас';
@@ -1097,10 +1116,14 @@ function cHome(){
           <span class="k">${CSTEP[Math.min(phaseOf(S.myOrder),3)][0]}</span>
           <span class="t">Заявка в работе</span>
           <span class="s">${esc(A(S.myOrder))}</span><span class="go">→</span></button>`
-      : `<button class="q-hero" onclick="go('new')">${LEAF}
+      : isOpenNow()
+        ? `<button class="q-hero" onclick="go('new')">${LEAF}
           <span class="k">Забрать сегодня</span><span class="t">Вынести мусор</span>
           <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
-          <span class="go">→</span></button>`}
+          <span class="go">→</span></button>`
+        : `<div class="q-hero closed">${LEAF}
+          <span class="k">Сейчас закрыто</span><span class="t">Откроемся в ${OPEN_H}:00</span>
+          <span class="s">${openHoursText()}</span></div>`}
     ${rateCard()}
     <div class="q-stats">
       <div class="q-st"><div class="n">${done.length}</div><div class="c">раз вынесли за вас</div></div>
@@ -1190,6 +1213,10 @@ function cLive(){
             ? `<b>★ ${fmtAvg(avgOf(o.volunteerId))}</b> · ${(S.board[o.volunteerId]||{}).ordersCompleted||0} ${plural((S.board[o.volunteerId]||{}).ordersCompleted||0,'заявка','заявки','заявок')}`
             : 'волонтёр Qulay · новичок'}</div></div>
         ${o.volunteerPhone?`<button class="q-call" onclick="openContact()" aria-label="Связаться с волонтёром">📞</button>`:''}</div>`):''}</div>
+    ${ph===0&&closingSoon()?`<div class="q-card"><div class="q-row"><div class="q-ic sun">🌙</div>
+      <div><div class="a">Скоро закрытие</div>
+      <div class="b">Если до ${CLOSE_H}:00 волонтёр не найдётся, заявку придётся
+        отменить — утром с ${OPEN_H}:00 её можно повторить одной кнопкой.</div></div></div></div>`:''}
     ${ph===0&&S.noVol?`<div class="q-card"><div class="q-row"><div class="q-ic sun">⏳</div>
       <div><div class="a">Что можно сделать</div>
       <div class="b">Заявка никуда не пропала — она висит у всех волонтёров района.</div></div></div>
@@ -1492,6 +1519,10 @@ const UZ={
 "Отправить ссылку":"Havolani yuborish","Оформление":"Ko‘rinish",
 "Оценки обо мне":"Men haqimdagi baholar","Оценок пока нет":"Hozircha baho yo‘q",
 "Пакет забрал":"Paketni oldim","Повторить":"Takrorlash","Подождать ещё":"Yana kutish",
+"Сейчас закрыто":"Hozir yopiq","Скоро закрытие":"Tez orada yopiladi",
+"Проложить маршрут":"Marshrut qurish","Сколько получилось":"Qancha chiqdi",
+"Позвонить":"Qo‘ng‘iroq qilish","Закрыть":"Yopish","Позже сегодня":"Bugun keyinroq",
+"до 3 кг":"3 kg gacha","больше 15":"15 dan ortiq",
 "Подъезд":"Podez","Пожаловаться":"Shikoyat qilish",
 "Позвать друга в волонтёры":"Do‘stni ko‘ngilli qilib chaqirish","Позвать соседа":"Qo‘shnini chaqirish",
 "Пока пусто":"Hozircha bo‘sh","Помощь и правила":"Yordam va qoidalar",
@@ -2061,11 +2092,19 @@ function listen(){
     if(ROLE==='cl'){
       const mine=myOrders();
       const live=mine.find(o=>o.status!=='done'&&o.status!=='cancelled');
+      const prev=S.myOrder;
       S.myOrder=live||null;
       if(S.myOrder && S.view==='new') S.view='live';
       if(!S.myOrder && S.view==='live'){
         const pr=pendingRating();
         if(pr){ S.finOrder=pr; S.view='fin' } else S.view='home';
+      }
+      // заявку закрыл не сам житель — без объяснения экран просто молча
+      // сменился бы на главный, и человек не понял бы, куда всё делось
+      if(prev&&!live){
+        const gone=mine.find(o=>o.id===prev.id&&o.status==='cancelled');
+        if(gone&&gone.cancelledBy==='schedule'){ hap('warning');
+          toast(`Волонтёр не нашёлся до ${CLOSE_H}:00 — попробуйте утром`) }
       }
       if(S.myOrder&&S.myOrder.status==='open') armWait(S.myOrder);
       else { clearTimeout(waitT); S.noVol=false; S.waitUntil=0 }
@@ -2420,6 +2459,7 @@ function submit(){
   // вторая одновременная заявка делала первую невидимой для жителя,
   // но она продолжала висеть у волонтёров
   if(S.myOrder&&!isGod()){ toast('У вас уже есть активная заявка'); S.view='live'; render(); return }
+  if(!isOpenNow()&&!isGod()){ toast(openHoursText()+'. Приходите утром!'); render(); return }
   // мягкий предохранитель на время пилота: волонтёров мало, и один человек
   // не должен занимать их весь день
   const since=Date.now()-86400000;
