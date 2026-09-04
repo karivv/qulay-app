@@ -483,21 +483,25 @@ const TIMES=['14:00','16:00','18:00','20:00'];
    с извинением: держать её до утра нечестно — житель всю ночь думает, что идут.
    Уже взятую заявку закрытие не трогает, волонтёр спокойно доводит её до конца. */
 const OPEN_H=7, CLOSE_H=21;
+/* Сдвиг часов для проверки: часы работы и запланированные заявки иначе
+   проверяются только вечером. Доступен с god-номера, живёт до перезахода. */
+let tShift=0;
+const nowMs=()=>Date.now()+tShift*3600000;
+const nowD=()=>new Date(nowMs());
 function isOpenNow(d){
-  const h=(d||new Date()).getHours();
+  const h=(d||nowD()).getHours();
   return h>=OPEN_H&&h<CLOSE_H;
 }
 const openHoursText=()=>`Сервис работает с ${OPEN_H}:00 до ${CLOSE_H}:00`;
 /* последний час перед закрытием — предупреждаем, что заявка может не успеть */
 function closingSoon(){
-  const n=new Date();
-  return n.getHours()===CLOSE_H-1;
+  return nowD().getHours()===CLOSE_H-1;
 }
 /* Главная кнопка меняет цвет и подпись по времени суток — утром прохладный
    рассвет, днём обычный зелёный, вечером тёплый закат. Заодно человек сразу
    видит, что до закрытия недалеко, не читая мелкий текст. */
 function dayPart(){
-  const h=new Date().getHours();
+  const h=nowD().getHours();
   if(h<11) return {cls:'morn', k:'Доброе утро'};
   if(h<17) return {cls:'', k:'Забрать сегодня'};
   if(h<CLOSE_H-1) return {cls:'eve', k:'Добрый вечер'};
@@ -592,7 +596,7 @@ function dt(d){return new Date(d).toLocaleString('ru',
   {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}
 /* слоты «ко времени», до которых ещё можно успеть: прошедшие не предлагаем */
 function futureTimes(){
-  const n=new Date(), cur=n.getHours()*60+n.getMinutes()+20;
+  const n=nowD(), cur=n.getHours()*60+n.getMinutes()+20;
   // позже закрытия записывать не на что — волонтёров в это время уже нет
   return TIMES.filter(t=>{ const [h,m]=t.split(':').map(Number);
     return h*60+m>cur && h<CLOSE_H });
@@ -612,7 +616,8 @@ function dueAt(o){
 }
 function isDue(o){
   const t=dueAt(o); if(t==null) return true;      // «сейчас» — всегда актуальна
-  return Date.now()>=t-LEAD_MIN*60000;
+  if(isGod()) return true;                        // на проверке ждать вечера незачем
+  return nowMs()>=t-LEAD_MIN*60000;
 }
 /* средняя оценка любого участника из таблицы лидеров */
 function avgOf(id){ const b=S.board[id]; return b&&b.ratingCount ? b.ratingSum/b.ratingCount : 0 }
@@ -1024,6 +1029,7 @@ function profileView(){
     </div>`:''}
     <div class="q-lbl">Кого вы пригласили</div>
     ${refList()}
+    ${isGod()?godPanel():''}
     <div class="q-lbl">Данные</div>
     <div class="q-f"><label>Имя</label><input id="p_name" value="${esc(me.name)}"></div>
     <div class="q-f"><label>Телефон</label><input id="p_phone" value="${esc(me.phone)}"></div>
@@ -1079,6 +1085,31 @@ function settingsView(){
 /* Переключение роли без перерегистрации — только для владельца.
    Пишем и в Firebase тоже: иначе следующий вход прочитает старую роль
    из профиля и вернёт всё обратно. */
+/* Панель проверки — только на god-номере. Часы работы и запланированные
+   заявки иначе не проверить, не дождавшись вечера. */
+function godPanel(){
+  const n=nowD(), open=isOpenNow();
+  const hh=String(n.getHours()).padStart(2,'0'), mm=String(n.getMinutes()).padStart(2,'0');
+  return `<div class="q-lbl">Проверка</div>
+    <div class="q-card flat"><div class="q-row"><div class="q-ic sm ${open?'':'sun'}">🕓</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">Время в приложении: ${hh}:${mm}</div>
+      <div class="b">${open?'Сервис открыт':'Сервис закрыт'}${tShift?` · сдвиг ${tShift>0?'+':''}${tShift} ч`:''}</div>
+      </div></div>
+      <div class="q-seg" style="margin-top:12px">
+        <button onclick="shiftTime(-1)">−1 ч</button>
+        <button onclick="shiftTime(0)">Сейчас</button>
+        <button onclick="shiftTime(1)">+1 ч</button>
+        <button onclick="shiftTime(3)">+3 ч</button></div>
+      <p class="q-help">Сдвигает время только у вас в приложении — чтобы увидеть
+        закрытие в ${CLOSE_H}:00 и «Позже сегодня», не дожидаясь вечера.
+        Бот живёт по настоящему времени и заявку закроет по нему.</p>
+    </div>`;
+}
+function shiftTime(h){
+  tShift = h===0 ? 0 : tShift+h;
+  hap('light'); render();
+  toast(tShift?`Время сдвинуто на ${tShift>0?'+':''}${tShift} ч`:'Время настоящее');
+}
 function godRole(fbRole){
   if(!isGod()) return;
   if((fbRole==='volunteer')===(ROLE==='vo')) return;
@@ -1141,7 +1172,7 @@ function cHome(){
           <span class="k">${CSTEP[Math.min(phaseOf(S.myOrder),3)][0]}</span>
           <span class="t">Заявка в работе</span>
           <span class="s">${esc(A(S.myOrder))}</span><span class="go">→</span></button>`
-      : isOpenNow()
+      : (isOpenNow()||isGod())
         ? `<button class="q-hero ${dayPart().cls}" onclick="go('new')">${LEAF}
           <span class="k">${dayPart().k}</span><span class="t">Вынести мусор</span>
           <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
