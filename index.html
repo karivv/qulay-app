@@ -1813,6 +1813,43 @@ const UZ={
 "Первая заявка":"Birinchi buyurtma","Пять заявок":"Beshta buyurtma","Десять заявок":"O‘nta buyurtma",
 "Пятнадцать заявок":"O‘n beshta buyurtma","Двадцать заявок":"Yigirmata buyurtma",
 "Оценка 4,8+":"Baho 4,8+","Сто очков":"Yuz ochko","Триста очков":"Uch yuz ochko",
+/* режим владельца */
+"Режим владельца":"Egasi rejimi","Я житель":"Men yashovchiman","Я волонтёр":"Men ko‘ngilliman",
+"Этот блок виден только на вашем номере. Суточный лимит снят, роль переключается без кода приглашения — обе стороны можно проверить с одного телефона.":
+  "Bu blok faqat sizning raqamingizda ko‘rinadi. Kunlik cheklov olib tashlangan, rol taklif kodisiz almashadi — ikkala tomonni bitta telefondan tekshirish mumkin.",
+/* помощь и правила */
+"Не открывайте дверь":"Eshikni ochmang",
+"Оставьте пакет за дверью. Волонтёру не нужно заходить внутрь.":
+  "Paketni eshik oldida qoldiring. Ko‘ngilliga ichkariga kirish shart emas.",
+"В приложении видно имя волонтёра и его оценку. Совпадает — всё в порядке.":
+  "Ilovada ko‘ngillining ismi va bahosi ko‘rinadi. Mos kelsa — hammasi joyida.",
+"Волонтёр не пришёл":"Ko‘ngilli kelmadi",
+"Позвоните ему прямо из заявки. Не отвечает — отмените, заявка вернётся другим.":
+  "Buyurtmadan turib qo‘ng‘iroq qiling. Javob bermasa — bekor qiling, buyurtma boshqalarga qaytadi.",
+/* заявка и адрес */
+"Где забрать":"Qayerdan olish","Уточните адрес":"Manzilni aniqlashtiring",
+"Передвиньте карту к вашему дому":"Xaritani uyingizga suring",
+"Определить моё место":"Joyimni aniqlash",
+"Вынести мусор — одна кнопка":"Chiqindini chiqarish — bitta tugma",
+"Ваша заявка сейчас в работе":"Buyurtmangiz hozir bajarilmoqda",
+"Квартира и подъезд откроются, когда возьмёте заявку":
+  "Kvartira va podez buyurtmani olganingizda ochiladi",
+"Позже сегодня":"Bugun keyinroq",
+/* волонтёр */
+"Житель видит, что вы в пути":"Yashovchi yo‘lda ekaningizni ko‘ryapti",
+"Житель выносит пакет":"Yashovchi paketni chiqaryapti",
+"Донесите до контейнера":"Konteynergacha olib boring",
+"На глаз — это идёт в общий счётчик дома и в вашу статистику.":
+  "Taxminan — bu uyning umumiy hisobiga va statistikangizga qo‘shiladi.",
+"Стекло / банки":"Shisha / bankalar","Крупный мусор":"Yirik chiqindi",
+"Один пакет":"Bitta paket","Два-три пакета":"Ikki-uchta paket",
+"Район: не указан":"Tuman: ko‘rsatilmagan",
+"Укажите район ниже, чтобы участвовать в рейтинге.":
+  "Reytingda qatnashish uchun quyida tumanni ko‘rsating.",
+"Укажите район в профиле, чтобы участвовать":
+  "Qatnashish uchun profilda tumanni ko‘rsating",
+"Укажите дом ниже, чтобы участвовать в рейтинге.":
+  "Reytingda qatnashish uchun quyida uyni ko‘rsating.",
 };
 /* строки с подставленными именами и числами — по образцу */
 const UZ_RE=[
@@ -1836,6 +1873,22 @@ const UZ_RE=[
   [/^(.+) м от вас$/,"Sizdan $1 m"],
   [/^(.+) км от вас$/,"Sizdan $1 km"],
   [/^Соседи по дому (.+)$/,"$1-uy qo‘shnilari"],
+  /* точные раньше общих: цикл берёт первое совпадение, и «Дом (.+)»
+     иначе съел бы «Дом 23, кв. 12» целиком */
+  [/^Дом (.+), кв\. (.+)$/,"$1-uy, $2-xonadon"],
+  [/^Дом ([^,]+)$/,"$1-uy"],
+  [/^Подъезд (.+), этаж (.+)$/,"$1-podez, $2-qavat"],
+  [/^Район: (.+)$/,"Tuman: $1"],
+  [/^(\d+) заявк\S* · оценка (.+)$/,"$1 ta buyurtma · baho $2"],
+  [/^(\d+) оценка$/,"$1 ta baho"],
+  [/^Успеть до (.+)$/,"$1 gacha ulgurish"],
+  [/^Откроемся в (.+)$/,"$1 da ochilamiz"],
+  [/^Сервис работает с (.+) до (.+)$/,"Xizmat $1 dan $2 gacha ishlaydi"],
+  [/^до (\d+) кг$/,"$1 kg gacha"],
+  [/^(\d+)–(\d+) кг$/,"$1–$2 kg"],
+  [/^больше (\d+)$/,"$1 dan ortiq"],
+  [/^(\d+) м$/,"$1 m"],
+  [/^(\d+) км$/,"$1 km"],
   [/^Записать на (.+)$/,"$1 ga yozish"],
   [/^только что$/,"hozirgina"],
   [/^(\d+) мин назад$/,"$1 daq oldin"],
