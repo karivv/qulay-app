@@ -510,6 +510,11 @@ const DAY_LIMIT=3;
    может открыть приложение с разных устройств. Всё, что ниже завязано на isGod(),
    для остальных работает как обычно. */
 const GOD_PHONES=['901757636'];
+/* Запасное имя бота. Ссылка-приглашение обязана вести в бота, а не на сайт:
+   регистрация «в интернете» не попадает в Telegram-профиль, и бот потом
+   не может человеку написать. Актуальное имя приходит из config/bot и из
+   ?bot= — это значение нужно, только если и то, и другое недоступно. */
+const BOT_FALLBACK='quulay_uz_bot';
 function isGod(p){ return GOD_PHONES.includes(phoneDigits(p||(me&&me.phone)||'')) }
 /* через сколько сказать жителю, что заявку пока никто не взял.
    Две минуты пугали раньше времени — волонтёр столько идёт до подъезда. */
@@ -2396,17 +2401,16 @@ function rateCard(){
 function botName(){
   const q=P.get('bot')||S.botName||'';
   if(q){ try{ localStorage.setItem('qulay_bot',q) }catch(e){} return q }
-  try{ return localStorage.getItem('qulay_bot')||'' }catch(e){ return '' }
+  try{ const v=localStorage.getItem('qulay_bot'); if(v) return v }catch(e){}
+  return BOT_FALLBACK;
 }
 function refLink(){
-  const b=botName();
   /* именно ?start= — новичок попадает в чат бота, где номер отдаётся одной
      кнопкой; ?startapp= открыл бы Mini App в обход регистрации */
-  return b?`https://t.me/${b}?start=ref_${uid}`:'';
+  return `https://t.me/${botName()}?start=ref_${uid}`;
 }
 function invite(){
   const link=refLink();
-  if(!link){ toast('Секунду, подтягиваем ссылку — попробуйте ещё раз'); return }
   const nm=MYNAME();
   const txt=nm&&nm!=='Гость'
     ? nm+' приглашает вас в Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно!'
