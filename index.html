@@ -75,6 +75,11 @@ input,textarea{font-family:inherit}
 /* вне часов работы блок остаётся на месте, но перестаёт быть кнопкой */
 .q-hero.closed{background:linear-gradient(145deg,#5F7368,#3E4F46);box-shadow:var(--sh)}
 .q-hero.closed:active{transform:none}
+/* по времени суток: утро — прохладнее, вечер — теплее, последний час — тревожнее */
+.q-hero.morn{background:linear-gradient(145deg,#3FD39A,#12A175)}
+.q-hero.eve{background:linear-gradient(145deg,#2FBE86,#0F7F55)}
+.q-hero.late{background:linear-gradient(145deg,#E9A83C,#C97A1E);
+  box-shadow:0 16px 32px -16px rgba(201,122,30,.8)}
 .q-hero .leaf{position:absolute;right:-26px;top:-30px;width:150px;height:150px;opacity:.13;
   pointer-events:none}
 .q-hero .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;opacity:.88}
@@ -459,6 +464,7 @@ const S={
   lb:null,                     /* открытое на весь экран фото */
   sheet:false,                 /* открыт лист «Связаться» */
   kg:5,                        /* примерный вес, который волонтёр ставит при закрытии */
+  botName:'',                  /* имя бота из базы — для ссылки-приглашения */
   myPhoto:undefined,           /* своё фото волонтёра, undefined — ещё не читали */
   /* язык при первом запуске берём из Telegram: у узбекоязычных он и должен
      открыться на узбекском, а не заставлять искать настройку */
@@ -486,6 +492,16 @@ const openHoursText=()=>`Сервис работает с ${OPEN_H}:00 до ${CL
 function closingSoon(){
   const n=new Date();
   return n.getHours()===CLOSE_H-1;
+}
+/* Главная кнопка меняет цвет и подпись по времени суток — утром прохладный
+   рассвет, днём обычный зелёный, вечером тёплый закат. Заодно человек сразу
+   видит, что до закрытия недалеко, не читая мелкий текст. */
+function dayPart(){
+  const h=new Date().getHours();
+  if(h<11) return {cls:'morn', k:'Доброе утро'};
+  if(h<17) return {cls:'', k:'Забрать сегодня'};
+  if(h<CLOSE_H-1) return {cls:'eve', k:'Добрый вечер'};
+  return {cls:'late', k:`Успеть до ${CLOSE_H}:00`};
 }
 const RADII=['500 м','1 км','3 км'];
 const RADIUS_M={'500 м':500,'1 км':1000,'3 км':3000};
@@ -650,7 +666,11 @@ function fitViewport(){
   const el=document.getElementById('app'); if(!el) return;
   let h=0;
   try{ h=(TG&&(TG.viewportStableHeight||TG.viewportHeight))||0 }catch(e){}
-  if(!h) h=window.innerHeight;
+  // На холодном старте Android Telegram успевает отдать высоту, которой ещё нет
+  // (0 или пара десятков пикселей). Раньше это принималось как есть: #app
+  // схлопывался, и от приложения оставалась одна нижняя навигация.
+  if(!h||h<220) h=window.innerHeight||h;
+  if(!h) return;
   el.style.height=h+'px';
 }
 try{ if(TG) TG.onEvent('viewportChanged',fitViewport) }catch(e){}
@@ -1117,8 +1137,8 @@ function cHome(){
           <span class="t">Заявка в работе</span>
           <span class="s">${esc(A(S.myOrder))}</span><span class="go">→</span></button>`
       : isOpenNow()
-        ? `<button class="q-hero" onclick="go('new')">${LEAF}
-          <span class="k">Забрать сегодня</span><span class="t">Вынести мусор</span>
+        ? `<button class="q-hero ${dayPart().cls}" onclick="go('new')">${LEAF}
+          <span class="k">${dayPart().k}</span><span class="t">Вынести мусор</span>
           <span class="s">${S.addr.h?`Дом ${esc(S.addr.h)}, кв. ${esc(S.addr.q)}`:'Укажите адрес'}</span>
           <span class="go">→</span></button>`
         : `<div class="q-hero closed">${LEAF}
@@ -1797,11 +1817,13 @@ function render(){
        set:settingsView,help:helpView}
     : {home:vHome,work:vWork,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
        set:settingsView,help:helpView};
-  killMap(mapPick);mapPick=null; killMap(mapLive);mapLive=null;liveMarker=null;clientMarker=null;
-  killMap(mapVol);mapVol=null;volMarkers=[];
   if(ROLE==='vo'?!S.activeJob:!S.myOrder) stopGeoTrack();
+  const sc=keepScroll();
+  stashMaps();
   $('#app').innerHTML=(V[S.view]||V.home)()+lbView()+contactView();
   localize($('#app'));
+  restoreMaps();
+  restoreScroll(sc);
   syncBack();
   setTimeout(afterRender,60);
 }
@@ -1850,12 +1872,27 @@ function contactView(){
     <div class="grab"></div>
     <h4>${esc(p.name)}</h4>
     <div class="sub">Позвоните или отправьте готовую фразу — она придёт в чат Qulay</div>
-    ${p.phone?`<a class="big" href="${telHref(p.phone)}">
+    ${p.phone?`<a class="big" href="${telHref(p.phone)}" onclick="return dial('${esc(p.phone)}',event)">
       <span class="ic">📞</span><span>Позвонить<small>${esc(fmtPhone(p.phone))}</small></span></a>`:''}
     ${list.map(t=>`<button class="ph" onclick="sendPhrase(${JSON.stringify(t).replace(/"/g,'&quot;')})">
       <span>💬</span><span>${esc(t)}</span></button>`).join('')}
     <button class="x" onclick="closeContact()">Закрыть</button>
   </div></div>`;
+}
+/* Telegram по-разному относится к tel: — в одних клиентах ссылка открывает
+   набор номера, в других её молча глотает WebView. Поэтому пробуем несколько
+   путей подряд, а если ни один не сработал — хотя бы кладём номер в буфер,
+   чтобы человек мог вставить его в звонилку сам. */
+function dial(phone,ev){
+  const num='+998'+phoneDigits(phone);
+  const href='tel:'+num;
+  try{ if(TG&&TG.openLink){ TG.openLink(href); return false } }catch(e){}
+  try{ window.location.href=href; return false }catch(e){}
+  try{ window.open(href,'_self'); return false }catch(e){}
+  try{ navigator.clipboard.writeText(num); toast('Номер скопирован: '+num) }
+  catch(e){ toast(num) }
+  if(ev) ev.preventDefault();
+  return false;
 }
 function sendPhrase(text){
   const p=contactSide(); const o=ROLE==='cl'?S.myOrder:S.activeJob;
@@ -1888,11 +1925,67 @@ setInterval(tickLive,4000);
 /* ================= Leaflet-карты ================= */
 const TASH=[41.311,69.280];
 let mapPick=null, mapLive=null, mapVol=null;
-let liveMarker=null, clientMarker=null, volMarkers=[], geoWatch=null;
+let liveMarker=null, clientMarker=null, volMarkers=[], geoWatch=null, volFitted=false;
 
 function killMap(m){try{if(m){m.off();m.remove()}}catch(e){}}
+
+/* Карту нельзя пересобирать на каждое обновление из Firebase. Раньше render()
+   стирал весь #app, карта рождалась заново в центре Ташкента, а прокрутка
+   улетала наверх — стоило кому-то в городе создать заявку. Теперь живой узел
+   карты вынимается из DOM до перерисовки и возвращается на своё место после:
+   Leaflet продолжает работать, положение и зум сохраняются. */
+const MAP_IDS=['map-live','map-orders','map-pick'];
+let mapKeep={};
+function stashMaps(){
+  mapKeep={};
+  MAP_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el&&el._leaflet_id&&el.parentNode){ mapKeep[id]=el; el.parentNode.removeChild(el) }
+  });
+}
+function dropMap(id){
+  if(id==='map-live'){ killMap(mapLive); mapLive=null; liveMarker=null; clientMarker=null }
+  if(id==='map-orders'){ killMap(mapVol); mapVol=null; volMarkers=[]; volFitted=false }
+  if(id==='map-pick'){ killMap(mapPick); mapPick=null }
+}
+function restoreMaps(){
+  MAP_IDS.forEach(id=>{
+    const kept=mapKeep[id]; if(!kept) return;
+    const slot=document.getElementById(id);
+    if(slot&&slot.parentNode) slot.parentNode.replaceChild(kept,slot);
+    else dropMap(id);            // экрана с этой картой больше нет
+  });
+  mapKeep={};
+}
+/* Прокрутку тоже возвращаем: без этого любое обновление списка заявок
+   отбрасывает человека в начало экрана посреди чтения. */
+function keepScroll(){
+  const el=document.querySelector('#app .scroll');
+  return el?{top:el.scrollTop,view:S.view}:null;
+}
+function restoreScroll(sc){
+  if(!sc||sc.view!==S.view||!sc.top) return;
+  const el=document.querySelector('#app .scroll');
+  if(el) el.scrollTop=sc.top;
+}
 function tileLayer(){
   return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
+}
+/* Точку, которую человек уже выбирал, помним между заходами: дом не переезжает,
+   и начинать каждый раз с центра Ташкента — лишняя работа для жильца. */
+function savedPoint(){
+  try{ const v=JSON.parse(localStorage.getItem('qulay_pt')||'null');
+    return v&&v.lat!=null?v:null }catch(e){ return null }
+}
+function rememberPoint(lat,lng){
+  try{ localStorage.setItem('qulay_pt',JSON.stringify({lat,lng})) }catch(e){}
+}
+function lastPoint(){
+  if(S.geo) return [S.geo.lat,S.geo.lng];
+  const s=savedPoint(); if(s) return [s.lat,s.lng];
+  const prev=myOrders().find(o=>o.lat!=null);   // где забирали в прошлый раз
+  if(prev) return [prev.lat,prev.lng];
+  return TASH;
 }
 function greenIcon(){
   return L.divIcon({className:'',html:'<div style="font-size:24px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">📍</div>',
@@ -1912,17 +2005,29 @@ function clientIcon(){
 }
 
 function afterRender(){
+  /* вернувшаяся после перерисовки карта успела побыть вне DOM и потеряла
+     размеры — без этого она рисуется полосой или серым квадратом */
+  MAP_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el||!el._leaflet_id) return;
+    const m=id==='map-live'?mapLive:id==='map-orders'?mapVol:mapPick;
+    if(m) try{ m.invalidateSize({animate:false}) }catch(e){}
+  });
+
   /* карта-пикер: новая заявка жильца */
   const pickEl=document.getElementById('map-pick');
   if(pickEl&&!pickEl._leaflet_id){
-    const ctr=S.geo?[S.geo.lat,S.geo.lng]:TASH;
-    mapPick=L.map(pickEl,{zoomControl:false,attributionControl:false}).setView(ctr,16);
+    const ctr=lastPoint();
+    mapPick=L.map(pickEl,{zoomControl:false,attributionControl:false}).setView(ctr,17);
     tileLayer().addTo(mapPick);
     mapPick.on('moveend',()=>{
       const c=mapPick.getCenter();
       S.geo={lat:c.lat,lng:c.lng}; S.geoState='ok';
+      rememberPoint(c.lat,c.lng);
     });
     setTimeout(()=>mapPick.invalidateSize(),200);
+    // если точки ещё нет — спросим телефон, чтобы не начинать с центра города
+    if(!S.geo&&!savedPoint()) askGeoAndCenter();
   }
 
   /* карта живого трекинга: заявка в работе */
@@ -1979,14 +2084,17 @@ function updateVolMarkers(){
   openOrders().forEach(o=>{
     if(o.lat==null) return;
     const m=L.marker([o.lat,o.lng],{icon:orderIcon()}).addTo(mapVol);
-    m.bindPopup(`<b>${esc(A(o))}</b><br>${esc(M(o))}<br>${esc(o.bags||'')}`);
+    // заявка ещё не взята — квартиру и подъезд не показываем
+    m.bindPopup(`<b>${esc(Ashort(o))}</b><br>${esc(o.bags||'')}`);
     m.on('click',()=>m.openPopup());
     volMarkers.push(m);
   });
-  if(volMarkers.length&&S.geo){
+  // подгоняем масштаб только при первом показе: дальше карта принадлежит
+  // волонтёру — он её двигает, и дёргать её на каждую новую заявку нельзя
+  if(!volFitted&&volMarkers.length&&S.geo){
     const g=L.latLngBounds(volMarkers.map(m=>m.getLatLng()));
     g.extend([S.geo.lat,S.geo.lng]);
-    try{mapVol.fitBounds(g,{padding:[30,30],maxZoom:16})}catch(e){}
+    try{mapVol.fitBounds(g,{padding:[30,30],maxZoom:16}); volFitted=true}catch(e){}
   }
 }
 
@@ -2022,6 +2130,9 @@ function conn(msg){const c=$('#conn');
 /* ================= подключение ================= */
 function boot(){
   fitViewport(); applyChrome(); render();
+  // Telegram сообщает окончательный размер уже после запуска, и событие
+  // viewportChanged может прийти до первой отрисовки — перемеряем ещё раз сами
+  [80,300,900,2000].forEach(t=>setTimeout(fitViewport,t));
   try{
     firebase.initializeApp(CFG);
     db=firebase.database();
@@ -2082,6 +2193,10 @@ function start(){
     }).catch(()=>{});
   }
   db.ref('leaderboard').on('value',s=>{ S.board=s.val()||{}; render() },()=>{});
+  // имя бота для ссылки-приглашения — его пишет сам бот при старте
+  db.ref('config/bot').on('value',s=>{
+    const v=s.val(); if(v){ S.botName=v; try{ localStorage.setItem('qulay_bot',v) }catch(e){} }
+  },()=>{});
   loadRefs();
   listen();
   render();
@@ -2274,11 +2389,12 @@ function rateCard(){
     <button class="q-btn sm" style="margin-top:12px"
       onclick="openRating('${pr.id}')">Поставить оценку</button></div>`;
 }
-/* Имя бота приходит в ?bot= только когда приложение открыто по кнопке из чата.
-   Через кнопку меню его нет, поэтому первое известное значение запоминаем — иначе
-   «Поделиться» молча ломалось у всех, кто заходит через меню. */
+/* Имя бота: из ?bot= (заход по кнопке из чата), из базы — её пишет сам бот при
+   старте, или из памяти прошлого захода. Ссылка на сайт в приглашении не годится:
+   человек регистрируется «в интернете», данные не попадают в его Telegram-профиль,
+   и бот потом не может ему ничего написать. */
 function botName(){
-  const q=P.get('bot')||'';
+  const q=P.get('bot')||S.botName||'';
   if(q){ try{ localStorage.setItem('qulay_bot',q) }catch(e){} return q }
   try{ return localStorage.getItem('qulay_bot')||'' }catch(e){ return '' }
 }
@@ -2286,12 +2402,11 @@ function refLink(){
   const b=botName();
   /* именно ?start= — новичок попадает в чат бота, где номер отдаётся одной
      кнопкой; ?startapp= открыл бы Mini App в обход регистрации */
-  if(b) return `https://t.me/${b}?start=ref_${uid}`;
-  /* имени бота не знаем — делимся самим приложением, ссылка всё равно рабочая */
-  return location.origin+location.pathname+'?ref='+uid;
+  return b?`https://t.me/${b}?start=ref_${uid}`:'';
 }
 function invite(){
   const link=refLink();
+  if(!link){ toast('Секунду, подтягиваем ссылку — попробуйте ещё раз'); return }
   const nm=MYNAME();
   const txt=nm&&nm!=='Гость'
     ? nm+' приглашает вас в Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно!'
