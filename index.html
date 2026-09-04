@@ -2120,13 +2120,24 @@ function rateCard(){
     <button class="q-btn sm" style="margin-top:12px"
       onclick="openRating('${pr.id}')">Поставить оценку</button></div>`;
 }
-const botName=()=>P.get('bot')||'';
+/* Имя бота приходит в ?bot= только когда приложение открыто по кнопке из чата.
+   Через кнопку меню его нет, поэтому первое известное значение запоминаем — иначе
+   «Поделиться» молча ломалось у всех, кто заходит через меню. */
+function botName(){
+  const q=P.get('bot')||'';
+  if(q){ try{ localStorage.setItem('qulay_bot',q) }catch(e){} return q }
+  try{ return localStorage.getItem('qulay_bot')||'' }catch(e){ return '' }
+}
 function refLink(){
-  const b=botName(); return b?`https://t.me/${b}?start=ref_${uid}`:'';
+  const b=botName();
+  /* именно ?start= — новичок попадает в чат бота, где номер отдаётся одной
+     кнопкой; ?startapp= открыл бы Mini App в обход регистрации */
+  if(b) return `https://t.me/${b}?start=ref_${uid}`;
+  /* имени бота не знаем — делимся самим приложением, ссылка всё равно рабочая */
+  return location.origin+location.pathname+'?ref='+uid;
 }
 function invite(){
   const link=refLink();
-  if(!link){ toast('Откройте приложение из бота, чтобы получить свою ссылку'); return }
   const nm=MYNAME();
   const txt=nm&&nm!=='Гость'
     ? nm+' приглашает вас в Qulay — соседи-волонтёры выносят мусор из квартиры. Бесплатно!'
