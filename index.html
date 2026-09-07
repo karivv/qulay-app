@@ -2039,7 +2039,7 @@ const UZ_RE=[
   [/^Радиус: (.+)$/,"Radius: $1"],
   [/^Не больше (\d+) заявок в сутки$/,"Kuniga $1 tadan ko‘p emas"],
   [/^(\d+) оценок$/,"$1 ta baho"],
-  [/^(\d+) заяв\S* ждут? рядом$/,"Yaqinda $1 ta buyurtma kutyapti"],
+  [/^(\d+) заяв\S* жд(?:ёт|ут) рядом$/,"Yaqinda $1 ta buyurtma kutyapti"],
   [/^Всего (\d+) заяв\S* · ≈?(\d+) кг не осталось у подъезда$/,
    "Jami $1 ta buyurtma · $2 kg podez oldida qolmadi"],
   [/^(\d+) заяв\S* (?:закрыт\S*) · (\d+) очков всего$/,"$1 ta buyurtma yopildi · jami $2 ochko"],
@@ -2123,6 +2123,12 @@ function uzOne(k){
   if(!k) return null;
   let v=UZ[k];
   if(v==null){ for(const [re,to] of UZ_RE){ if(re.test(k)){ v=k.replace(re,to); break } } }
+  /* строки часто начинаются со значка: «🔒 Квартира и подъезд…». Держать в
+     словаре оба варианта — лишнее, поэтому пробуем ещё раз без значка. */
+  if(v==null){
+    const m=k.match(/^([^\p{L}\p{N}]+\s*)(.+)$/u);
+    if(m){ const inner=uzOne(m[2]); if(inner!=null) v=m[1]+inner }
+  }
   return v==null?null:v;
 }
 /* Проходим по текстовым узлам готового экрана. Код и обработчики не трогаем. */
