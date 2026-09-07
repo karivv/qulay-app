@@ -189,6 +189,15 @@ input,textarea{font-family:inherit}
 .q-call{width:42px;height:42px;border-radius:15px;background:#fff;color:#12925A;border:none;
   display:grid;place-items:center;font-size:17px;flex:none;text-decoration:none}
 
+/* карточка заявки открывается по тапу — показываем это нажатием */
+.q-card.tap{cursor:pointer;transition:transform .12s}
+.q-card.tap:active{transform:scale(.99)}
+.q-card.tap .ch{color:var(--mut);font-size:20px;flex:none;align-self:center}
+/* подписи маркеров: «Вы» / «Заявка» прямо на карте */
+.q-mtip{background:var(--inv-bg);color:var(--inv-ink);border:none;border-radius:8px;
+  padding:2px 7px;font-size:11px;font-weight:700;box-shadow:0 2px 8px -3px rgba(0,0,0,.5)}
+.q-mtip::before{display:none}
+
 .q-map{border-radius:22px;overflow:hidden;flex:none;box-shadow:var(--sh)}
 .q-map svg{display:block;width:100%;height:auto}
 .q-vdot{transition:cx .9s linear,cy .9s linear}
@@ -478,9 +487,10 @@ const S={
   from:'home',                 /* откуда пришли в «Помощь» — туда и вернём */
   lb:null,                     /* открытое на весь экран фото */
   sheet:false,                 /* открыт лист «Связаться» */
-  kg:5,                        /* примерный вес, который волонтёр ставит при закрытии */
+  kg:3,                        /* примерный вес, который волонтёр ставит при закрытии */
   botName:'',                  /* имя бота из базы — для ссылки-приглашения */
   draft:'',                    /* недописанное сообщение — переживает перерисовку */
+  previewId:null,              /* заявка, открытая на просмотр до принятия */
   myPhoto:undefined,           /* своё фото волонтёра, undefined — ещё не читали */
   /* язык при первом запуске берём из Telegram: у узбекоязычных он и должен
      открыться на узбекском, а не заставлять искать настройку */
@@ -490,6 +500,9 @@ const S={
 
 };
 if(me&&me.addr) S.addr=me.addr;
+/* радиусов стало три; у кого сохранён исчезнувший вариант — переносим на
+   ближайший, иначе ни одна кнопка не подсвечена и выбор выглядит сломанным */
+if(!RADII.includes(S.set.radius)) S.set.radius='1 км';
 /* ?lang=uz — быстрый способ посмотреть перевод, не заходя в настройки */
 if(P.get('lang')==='uz'||P.get('lang')==='ru') S.set.lang=P.get('lang');
 
@@ -523,8 +536,11 @@ function dayPart(){
   if(h<CLOSE_H-1) return {cls:'eve', k:'Добрый вечер'};
   return {cls:'late', k:`Успеть до ${CLOSE_H}:00`};
 }
-const RADII=['500 м','1 км','3 км'];
-const RADIUS_M={'500 м':500,'1 км':1000,'3 км':3000};
+const RADII=['500 м','1 км','2 км'];
+const RADIUS_M={'500 м':500,'1 км':1000,'2 км':2000};
+/* у кого в настройках остался старый «3 км» — молча переводим на ближайший,
+   иначе RADIUS_M[...] вернёт undefined и фильтр по радиусу перестанет работать */
+const radiusOf=()=>RADIUS_M[S.set.radius]||RADIUS_M['1 км'];
 const DAY_LIMIT=3;
 /* Режим владельца на время пилота. Номер, а не uid: телефон один, а Telegram-аккаунт
    может открыть приложение с разных устройств. Всё, что ниже завязано на isGod(),
@@ -563,7 +579,7 @@ const VSTEP=[['Идёте к дому','Житель видит, что вы в 
 const LEVELS=[[0,'Новичок'],[100,'Активный волонтёр'],[300,'Опытный волонтёр'],[600,'Герой квартала']];
 /* Вес ставит волонтёр на глаз при закрытии — точные весы никто носить не будет,
    а порядок величины нужен, чтобы счётчик дома не считал пакет и мешок одинаково. */
-const KG=[[2,'до 3 кг'],[5,'3–7 кг'],[10,'7–15 кг'],[20,'больше 15']];
+const KG=[[1,'0,5–1 кг'],[3,'2–3 кг'],[5,'3–5 кг']];
 /* Сумма реального веса вместо «заявок × 3»: у старых заявок веса нет —
    для них берём прежние 3 кг, иначе счётчик просел бы задним числом. */
 const kgOf=o=>o&&o.kg!=null?o.kg:3;
@@ -1074,8 +1090,8 @@ function settingsView(){
       <div class="q-li"><span class="t">Вибрация</span>${sw(S.set.vibro,"tgl('vibro')")}</div>
     </div>
     ${isVo?`<div class="q-lbl">Как далеко готовы идти</div>
-      <div class="q-chips">${RADII.map(r=>
-        `<button class="q-chip" aria-pressed="${S.set.radius===r}" onclick="setRadius('${r}')">${r}</button>`).join('')}</div>
+      <div class="q-seg">${RADII.map(r=>
+        `<button aria-pressed="${S.set.radius===r}" onclick="setRadius('${r}')">${r}</button>`).join('')}</div>
       <p class="q-help">Заявки дальше этого расстояния показываем приглушённо. Расстояние
         считается по прямой от вашей геопозиции до дома жителя — работает, только если
         вы оба разрешили доступ к местоположению.</p>`:''}
@@ -1314,7 +1330,7 @@ function cLive(){
       <button class="q-btn sm" style="margin-top:12px" onclick="keepWaiting()">Подождать ещё</button>
       <button class="q-btn sm danger" style="margin-top:8px" onclick="cancelOrder()">Отменить заявку</button>
     </div>`:''}
-    ${ph>=1?`<div id="map-live" class="q-leaflet"></div>`:''}
+    ${ph>=1?orderMapBlock(o,"map-live"):""}
     <div class="q-lbl">Что происходит</div>
     <div class="q-steps">${CSTEP.map((s,i)=>{
       const cls=i<ph?'ok':i===ph?'on':'';
@@ -1414,18 +1430,20 @@ function vHome(){
     ${list.some(o=>o.lat!=null)?`<div id="map-orders" class="q-leaflet tall"></div>`:''}
     ${S.geoState!=='ok'?geoCard():''}
     ${list.length?list.map(o=>{
-      const m=distM(S.geo,o), far=m!=null&&m>RADIUS_M[S.set.radius], sched=whenTag(o)!=='сейчас';
-      return `<div class="q-card"${far?' style="opacity:.55"':''}>
+      const m=distM(S.geo,o), far=m!=null&&m>radiusOf(), sched=whenTag(o)!=='сейчас';
+      return `<div class="q-card tap"${far?' style="opacity:.55"':''}
+        onclick="openOrder('${o.id}')">
       <div class="q-row"><div class="q-ic ${sched?'':'sun'}">${sched?'🕓':'📍'}</div>
         <div style="flex:1"><div class="a">${esc(Ashort(o))}</div>
         <div class="b">${when(o.createdAt)}</div>
-        ${m!=null?`<div class="b">${distLabel(m)} от вас${far?' · дальше вашего радиуса':''}</div>`:''}</div></div>
+        ${m!=null?`<div class="b">${distLabel(m)} от вас${far?' · дальше вашего радиуса':''}</div>`:''}</div>
+        <span class="ch">›</span></div>
       <div class="q-tags"><span class="q-tag ${sched?'sun':'g'}">${sched?esc(whenTag(o)):'сейчас'}</span>
         ${o.bags?`<span class="q-tag">${esc(o.bags)}</span>`:''}</div>
       <div class="b" style="font-size:12.5px;color:var(--mut);margin-top:9px">
         🔒 Квартира и подъезд откроются, когда возьмёте заявку</div>
       <button class="q-btn" style="margin-top:13px" ${S.activeJob?'disabled':''}
-        onclick="claim('${o.id}')">${S.activeJob?'Сначала закройте текущую':'Взять заявку'}</button>
+        onclick="event.stopPropagation();claim('${o.id}')">${S.activeJob?'Сначала закройте текущую':'Взять заявку'}</button>
     </div>`}).join('')
     :`<div class="q-empty"><div class="e">🌿</div><div class="t">Сейчас всё чисто</div>
       <div class="b">${later.length?'Ближайшие заявки — ниже, к назначенному времени'
@@ -1451,6 +1469,40 @@ function vHome(){
     ${!me.district?`<p class="q-help">Укажите район в профиле, чтобы участвовать в рейтинге.</p>`:''}
   </div>`,'home');
 }
+/* Заявка, открытая на просмотр до принятия. Отдельный экран, а не действие:
+   волонтёр должен увидеть, где это, прежде чем соглашаться идти. */
+function previewOrder(){
+  if(S.view!=='preview'||!S.previewId) return null;
+  return openOrders().find(o=>o.id===S.previewId)||null;
+}
+function openOrder(id){ S.previewId=id; S.view='preview'; render() }
+function vPreview(){
+  const o=previewOrder();
+  if(!o){ S.view='home'; return vHome() }   // заявку успели забрать
+  const m=distM(S.geo,o), sched=whenTag(o)!=='сейчас';
+  return wrap(`<div class="pad">
+    <button class="q-back" onclick="go('home')">← Назад</button>
+    <h3 class="q-h2">${esc(Ashort(o))}</h3>
+    <p class="q-help">${sched?esc(whenTag(o)):'Заберите сейчас'}${
+      m!=null?' · '+distLabel(m)+' от вас':''}</p>
+    ${orderMapBlock(o,'map-preview')}
+    ${o.lat!=null?`<button class="q-btn sm ghost" style="margin-top:10px"
+      onclick="routeTo(${o.lat},${o.lng})">🧭 Проложить маршрут</button>`:''}
+    <div class="q-lbl">Что забрать</div>
+    <div class="q-card flat"><div class="q-row"><div class="q-ic sm">🧺</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">${esc(o.bags||'Один пакет')}</div>
+      <div class="b">${when(o.createdAt)}</div></div></div></div>
+    <div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">🔒</div>
+      <div style="flex:1"><div class="a" style="font-size:14px">Точный адрес после принятия</div>
+      <div class="b">Квартиру, подъезд и комментарий увидите, когда возьмёте заявку</div>
+      </div></div></div>
+    <div class="push">
+      <button class="q-btn" ${S.activeJob?'disabled':''}
+        onclick="claim('${o.id}')">${S.activeJob?'Сначала закройте текущую':'Взять заявку'}</button>
+      <button class="q-btn sm ghost" style="margin-top:9px" onclick="go('home')">К списку</button>
+    </div>
+  </div>`,'home');
+}
 function vWork(){
   const o=S.activeJob; if(!o){ S.view='home'; return vHome() }
   const ph=phaseOf(o), st=Math.max(0,Math.min(ph-1,3));
@@ -1464,7 +1516,7 @@ function vWork(){
         <div style="flex:1"><div class="nm">${esc(o.clientName||'Житель')}</div>
           <div class="rt">${esc(M(o))}</div></div>
         ${o.clientPhone?`<button class="q-call" onclick="openContact()" aria-label="Связаться с жителем">📞</button>`:''}</div></div>
-    ${ph<4?`<div id="map-live" class="q-leaflet"></div>`:''}
+    ${ph<4?orderMapBlock(o,"map-live"):""}
     ${ph<3&&o.lat!=null?`<button class="q-btn sm ghost" style="margin-top:10px"
       onclick="route()">🧭 Проложить маршрут</button>`:''}
     ${o.note?`<div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">💬</div>
@@ -1654,7 +1706,7 @@ const UZ={
 "Укажите адрес":"Manzilni ko‘rsating","Укажите дом":"Uyni ko‘rsating",
 "Укажите район":"Tumanni ko‘rsating",
 /* радиус поиска */
-"500 м":"500 m","1 км":"1 km","3 км":"3 km",
+"500 м":"500 m","1 км":"1 km","2 км":"2 km",
 /* онбординг */
 "Мусор вынесут за вас":"Chiqindini olib ketamiz",
 "Qulay — соседи-волонтёры заберут мусор от вашей двери до контейнера. Бесплатно.":
@@ -1721,12 +1773,21 @@ const UZ={
 "Такой заявки больше нет":"Bunday buyurtma endi yo‘q",
 "Эта заявка сейчас не за вами":"Bu buyurtma hozir sizda emas",
 "Статус заявки изменился":"Buyurtma holati o‘zgardi",
+/* подписи маркеров на карте */
+"Вы":"Siz","Заявка":"Buyurtma","Ваш дом":"Sizning uyingiz",
+/* просмотр заявки до принятия */
+"Заберите сейчас":"Hozir olib keting","К списку":"Ro‘yxatga",
+"Что забрать":"Nimani olish","Точный адрес после принятия":"Aniq manzil — qabul qilgandan keyin",
+"Квартиру, подъезд и комментарий увидите, когда возьмёте заявку":
+  "Xonadon, podez va izohni buyurtmani olganingizda ko‘rasiz",
+"Точка не указана — ориентируйтесь по адресу":
+  "Nuqta ko‘rsatilmagan — manzil bo‘yicha mo‘ljal oling",
 "Не удалось вернуть заявку":"Buyurtmani qaytarib bo‘lmadi",
 "Заявка вернулась другим волонтёрам":"Buyurtma boshqa ko‘ngillilarga qaytdi",
 "Не удалось отменить":"Bekor qilib bo‘lmadi","Заявка отменена":"Buyurtma bekor qilindi",
 "Проложить маршрут":"Marshrut qurish","Сколько получилось":"Qancha chiqdi",
 "Позвонить":"Qo‘ng‘iroq qilish","Закрыть":"Yopish","Позже сегодня":"Bugun keyinroq",
-"до 3 кг":"3 kg gacha","больше 15":"15 dan ortiq",
+"0,5–1 кг":"0,5–1 kg","2–3 кг":"2–3 kg","3–5 кг":"3–5 kg",
 "Подъезд":"Podez","Пожаловаться":"Shikoyat qilish",
 "Позвать друга в волонтёры":"Do‘stni ko‘ngilli qilib chaqirish","Позвать соседа":"Qo‘shnini chaqirish",
 "Пока пусто":"Hozircha bo‘sh","Помощь и правила":"Yordam va qoidalar",
@@ -2104,7 +2165,7 @@ function render(){
   const V = ROLE==='cl'
     ? {home:cHome,new:cNew,live:cLive,hist:cHist,rank:cRank,fin:cFin,prof:profileView,
        set:settingsView,help:helpView}
-    : {home:vHome,work:vWork,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
+    : {home:vHome,work:vWork,preview:vPreview,hist:vHist,rev:vRev,fin:vFin,prof:profileView,
        set:settingsView,help:helpView};
   if(ROLE==='vo'?!S.activeJob:!S.myOrder) stopGeoTrack();
   const sc=keepScroll();
@@ -2160,10 +2221,14 @@ function contactSide(){
 }
 /* Маршрут до заявки. В Ташкенте у волонтёров почти всегда Яндекс.Карты —
    web-ссылка сама открывает приложение, если оно стоит. */
+function routeTo(lat,lng){
+  if(lat==null||lng==null){ toast('У этой заявки нет точки на карте'); return }
+  openLink(`https://yandex.ru/maps/?rtext=~${lat},${lng}&rtt=pd`);
+}
 function route(){
   const o=S.activeJob;
-  if(!o||o.lat==null){ toast('У этой заявки нет точки на карте'); return }
-  openLink(`https://yandex.ru/maps/?rtext=~${o.lat},${o.lng}&rtt=pd`);
+  if(!o){ toast('У этой заявки нет точки на карте'); return }
+  routeTo(o.lat,o.lng);
 }
 function setKg(v){ S.kg=v; hap('light'); render() }
 function openContact(){ S.sheet=true; render() }
@@ -2263,7 +2328,10 @@ setInterval(tickLive,4000);
 /* ================= Leaflet-карты ================= */
 const TASH=[41.311,69.280];
 let mapPick=null, mapLive=null, mapVol=null;
-let liveMarker=null, clientMarker=null, volMarkers=[], geoWatch=null, volFitted=false;
+let volMarkers=[], geoWatch=null, volFitted=false;
+let mapPrev=null;                      /* карта в предпросмотре заявки */
+let liveMarks={}, prevMarks={};        /* маркеры по ключу: order | vol | cli */
+let liveFitted=false, prevFitted=false;
 
 function killMap(m){try{if(m){m.off();m.remove()}}catch(e){}}
 
@@ -2272,7 +2340,7 @@ function killMap(m){try{if(m){m.off();m.remove()}}catch(e){}}
    улетала наверх — стоило кому-то в городе создать заявку. Теперь живой узел
    карты вынимается из DOM до перерисовки и возвращается на своё место после:
    Leaflet продолжает работать, положение и зум сохраняются. */
-const MAP_IDS=['map-live','map-orders','map-pick'];
+const MAP_IDS=['map-live','map-orders','map-pick','map-preview'];
 let mapKeep={};
 function stashMaps(){
   mapKeep={};
@@ -2282,7 +2350,8 @@ function stashMaps(){
   });
 }
 function dropMap(id){
-  if(id==='map-live'){ killMap(mapLive); mapLive=null; liveMarker=null; clientMarker=null }
+  if(id==='map-live'){ killMap(mapLive); mapLive=null; liveMarks={}; liveFitted=false }
+  if(id==='map-preview'){ killMap(mapPrev); mapPrev=null; prevMarks={}; prevFitted=false }
   if(id==='map-orders'){ killMap(mapVol); mapVol=null; volMarkers=[]; volFitted=false }
   if(id==='map-pick'){ killMap(mapPick); mapPick=null }
 }
@@ -2323,7 +2392,17 @@ function lastPoint(){
   const s=savedPoint(); if(s) return [s.lat,s.lng];
   const prev=myOrders().find(o=>o.lat!=null);   // где забирали в прошлый раз
   if(prev) return [prev.lat,prev.lng];
-  return TASH;
+  return TASH;   // только для выбора точки: карту надо с чего-то начать
+}
+/* Карта заявки. Точек нет — не рисуем фальшивую точку в центре города,
+   а честно говорим, что геопозиции нет, и предлагаем определить. */
+function orderMapBlock(o,id){
+  if(pairPoints(o).length) return `<div id="${id}" class="q-leaflet"></div>`;
+  return `<div class="q-card flat"><div class="q-row"><div class="q-ic sm sun">📍</div>
+    <div style="flex:1"><div class="a" style="font-size:14px">Геопозиция недоступна</div>
+    <div class="b">Точка не указана — ориентируйтесь по адресу</div></div></div>
+    <button class="q-btn sm ghost" style="margin-top:10px"
+      onclick="askGeoAndCenter()">📍 Определить моё место</button></div>`;
 }
 function greenIcon(){
   return L.divIcon({className:'',html:'<div style="font-size:24px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">📍</div>',
@@ -2342,13 +2421,64 @@ function clientIcon(){
     iconSize:[22,22],iconAnchor:[11,22]});
 }
 
+/* Точки, которые есть смысл показать по заявке. Пусто — значит показывать
+   нечего, и карту рисовать не нужно: раньше в этом случае она открывалась
+   в центре Ташкента, и это выглядело как «волонтёр у сквера Амира Темура». */
+function pairPoints(o){
+  const pts=[];
+  if(o&&o.lat!=null&&o.lng!=null)
+    pts.push({k:'order',ll:[o.lat,o.lng],icon:greenIcon(),
+      label:ROLE==='cl'?'Ваш дом':'Заявка'});
+  // у волонтёра своя позиция свежее той, что успела долететь до заявки
+  const vll=(ROLE==='vo'&&S.geo)?[S.geo.lat,S.geo.lng]
+    :(o&&o.volunteerLat!=null&&o.volunteerLng!=null)?[o.volunteerLat,o.volunteerLng]:null;
+  if(vll) pts.push({k:'vol',ll:vll,icon:volIcon(),label:ROLE==='vo'?'Вы':'Волонтёр'});
+  const cll=(ROLE==='cl'&&S.geo)?[S.geo.lat,S.geo.lng]
+    :(o&&o.clientLat!=null&&o.clientLng!=null)?[o.clientLat,o.clientLng]:null;
+  if(cll&&!(ROLE==='cl'&&pts.some(p=>p.k==='order')))
+    pts.push({k:'cli',ll:cll,icon:clientIcon(),label:ROLE==='cl'?'Вы':'Житель'});
+  return pts;
+}
+function fitPts(m,pts){
+  if(!m||!pts.length) return;
+  if(pts.length===1){ m.setView(pts[0].ll,16); return }
+  // обе точки должны поместиться на экран — как в обычных картах
+  try{ m.fitBounds(L.latLngBounds(pts.map(p=>p.ll)),{padding:[45,45],maxZoom:16}) }catch(e){}
+}
+function tip(m,text){
+  return m.bindTooltip(uzs(text),{permanent:true,direction:'top',className:'q-mtip'});
+}
+function drawPairMap(id,o){
+  const el=document.getElementById(id); if(!el) return;
+  const pts=pairPoints(o); if(!pts.length) return;
+  const store=id==='map-live'?liveMarks:prevMarks;
+  if(!el._leaflet_id){
+    const m=L.map(el,{zoomControl:false,attributionControl:false,dragging:true,
+      touchZoom:true,scrollWheelZoom:false}).setView(pts[0].ll,16);
+    tileLayer().addTo(m);
+    pts.forEach(p=>{ store[p.k]=tip(L.marker(p.ll,{icon:p.icon}).addTo(m),p.label) });
+    fitPts(m,pts);
+    setTimeout(()=>m.invalidateSize(),200);
+    if(id==='map-live'){ mapLive=m; liveFitted=true } else { mapPrev=m; prevFitted=true }
+    return;
+  }
+  const m=id==='map-live'?mapLive:mapPrev; if(!m) return;
+  pts.forEach(p=>{
+    if(store[p.k]) store[p.k].setLatLng(p.ll);
+    else store[p.k]=tip(L.marker(p.ll,{icon:p.icon}).addTo(m),p.label);
+  });
+  // подгоняем масштаб только один раз: дальше карта принадлежит человеку
+  const fitted=id==='map-live'?liveFitted:prevFitted;
+  if(!fitted){ fitPts(m,pts); if(id==='map-live') liveFitted=true; else prevFitted=true }
+}
 function afterRender(){
   /* вернувшаяся после перерисовки карта успела побыть вне DOM и потеряла
      размеры — без этого она рисуется полосой или серым квадратом */
   MAP_IDS.forEach(id=>{
     const el=document.getElementById(id);
     if(!el||!el._leaflet_id) return;
-    const m=id==='map-live'?mapLive:id==='map-orders'?mapVol:mapPick;
+    const m=id==='map-live'?mapLive:id==='map-orders'?mapVol
+      :id==='map-preview'?mapPrev:mapPick;
     if(m) try{ m.invalidateSize({animate:false}) }catch(e){}
   });
 
@@ -2368,48 +2498,25 @@ function afterRender(){
     if(!S.geo&&!savedPoint()) askGeoAndCenter();
   }
 
-  /* карта живого трекинга: заявка в работе */
-  const liveEl=document.getElementById('map-live');
-  if(liveEl&&!liveEl._leaflet_id){
-    const o=ROLE==='cl'?S.myOrder:S.activeJob;
-    const ctr=(o&&o.lat!=null)?[o.lat,o.lng]:TASH;
-    mapLive=L.map(liveEl,{zoomControl:false,attributionControl:false,dragging:true,
-      touchZoom:true,scrollWheelZoom:false}).setView(ctr,16);
-    tileLayer().addTo(mapLive);
-    if(o&&o.lat!=null) L.marker([o.lat,o.lng],{icon:greenIcon()}).addTo(mapLive)
-      .bindPopup(esc(uzs(A(o))));
-    const vLat=o&&o.volunteerLat, vLng=o&&o.volunteerLng;
-    if(vLat!=null&&vLng!=null){
-      liveMarker=L.marker([vLat,vLng],{icon:volIcon()}).addTo(mapLive);
-    }
-    const cLat=o&&o.clientLat, cLng=o&&o.clientLng;
-    if(cLat!=null&&cLng!=null){
-      clientMarker=L.marker([cLat,cLng],{icon:clientIcon()}).addTo(mapLive);
-    }
-    setTimeout(()=>mapLive.invalidateSize(),200);
-  } else if(mapLive){
-    const o=ROLE==='cl'?S.myOrder:S.activeJob;
-    if(o&&o.volunteerLat!=null&&o.volunteerLng!=null){
-      if(liveMarker) liveMarker.setLatLng([o.volunteerLat,o.volunteerLng]);
-      else { liveMarker=L.marker([o.volunteerLat,o.volunteerLng],{icon:volIcon()}).addTo(mapLive); }
-    }
-    if(o&&o.clientLat!=null&&o.clientLng!=null){
-      if(clientMarker) clientMarker.setLatLng([o.clientLat,o.clientLng]);
-      else { clientMarker=L.marker([o.clientLat,o.clientLng],{icon:clientIcon()}).addTo(mapLive); }
-    }
-  }
+  /* карта заявки: и «в работе», и предпросмотр до принятия — обе показывают
+     одни и те же точки, поэтому рисуются одной функцией */
+  drawPairMap('map-live', ROLE==='cl'?S.myOrder:S.activeJob);
+  drawPairMap('map-preview', previewOrder());
 
   /* карта заявок для волонтёра */
   const volEl=document.getElementById('map-orders');
   if(volEl&&!volEl._leaflet_id){
-    const ctr=S.geo?[S.geo.lat,S.geo.lng]:TASH;
-    mapVol=L.map(volEl,{zoomControl:false,attributionControl:false}).setView(ctr,14);
+    // без своей геопозиции карту не открываем вовсе — раньше она уезжала
+    // в центр Ташкента и выглядела так, будто заявки в сквере Амира Темура
+    if(!S.geo) return;
+    mapVol=L.map(volEl,{zoomControl:false,attributionControl:false})
+      .setView([S.geo.lat,S.geo.lng],14);
     tileLayer().addTo(mapVol);
-    if(S.geo) L.marker([S.geo.lat,S.geo.lng],{icon:volIcon()}).addTo(mapVol)
-      .bindPopup(esc(uzs('Вы здесь')));
+    L.marker([S.geo.lat,S.geo.lng],{icon:volIcon()}).addTo(mapVol)
+      .bindTooltip(uzs('Вы'),{permanent:true,direction:'top',className:'q-mtip'});
     updateVolMarkers();
     setTimeout(()=>mapVol.invalidateSize(),200);
-  } else if(mapVol&&document.getElementById('map-orders')){
+  } else if(mapVol&&volEl){
     updateVolMarkers();
   }
 
@@ -3015,7 +3122,7 @@ function setStatus(s){
       if(S.photoURL) db.ref('orderPhotos/'+o.id).set({
         img:S.photoURL, at:Date.now(), by:uid
       }).catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
-      S.finOrder={id:o.id,...fresh}; S.activeJob=null; S.photoURL=null; S.kg=5;
+      S.finOrder={id:o.id,...fresh}; S.activeJob=null; S.photoURL=null; S.kg=3;
       S.view='fin'; render();
     }
   });
