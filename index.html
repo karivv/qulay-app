@@ -853,49 +853,49 @@ function obLangView(){
     </div>
   </div></div>`;
 }
+/* Экраны онбординга пишем по-русски, как и все остальные: перевод берёт на
+   себя localize(). Раньше здесь стояли двуязычные тернарники — render() для
+   онбординга выходил раньше, чем вызывался обходчик, и иначе было никак. */
 function obWelcomeView(){
-  const uz=S.set.lang==='uz';
   return `<div class="scroll"><div class="q-ob">
     <div class="e">🏠</div>
-    <h2>${uz?'Chiqindini olib ketamiz':'Мусор вынесут за вас'}</h2>
-    <p>${uz?'Qulay — qo\'shni ko\'ngillilar chiqindini uyingizdan konteynergacha olib borishadi. Bepul.':'Qulay — соседи-волонтёры заберут мусор от вашей двери до контейнера. Бесплатно.'}</p>
+    <h2>Мусор вынесут за вас</h2>
+    <p>Qulay — соседи-волонтёры заберут мусор от вашей двери до контейнера. Бесплатно.</p>
     <div class="steps">
-      <div class="stp"><div class="num">1</div><div class="tx">${uz?'Buyurtma qoldiring — manzil va vaqtni tanlang':'Оставьте заявку — укажите адрес и время'}</div></div>
-      <div class="stp"><div class="num">2</div><div class="tx">${uz?'Ko\'ngilli keladi va paketni oladi':'Волонтёр придёт и заберёт пакет'}</div></div>
-      <div class="stp"><div class="num">3</div><div class="tx">${uz?'Xaritada ko\'ring — chiqindi konteynergacha yetdi':'Видите на карте — мусор доехал до контейнера'}</div></div>
+      <div class="stp"><div class="num">1</div><div class="tx">Оставьте заявку — укажите адрес и время</div></div>
+      <div class="stp"><div class="num">2</div><div class="tx">Волонтёр придёт и заберёт пакет</div></div>
+      <div class="stp"><div class="num">3</div><div class="tx">Видите на карте — мусор доехал до контейнера</div></div>
     </div>
     ${obDots(0)}
-    <button class="q-btn" style="max-width:300px" onclick="obNext()">${uz?'Davom etish':'Далее'}</button>
+    <button class="q-btn" style="max-width:300px" onclick="obNext()">Далее</button>
   </div></div>`;
 }
 function obSafetyView(){
-  const uz=S.set.lang==='uz';
   return `<div class="scroll"><div class="q-ob">
     <div class="e">🛡️</div>
-    <h2>${uz?'Xavfsizlik':'Безопасность'}</h2>
-    <p>${uz?'Barchaning xotirjamligi uchun bir necha oddiy qoidalar.':'Несколько простых правил для спокойствия каждого.'}</p>
+    <h2>Безопасность</h2>
+    <p>Несколько простых правил для спокойствия каждого.</p>
     <div class="steps">
-      <div class="stp"><div class="num">🔒</div><div class="tx">${uz?'Paketni eshik oldiga qo\'ying. Ko\'ngilli ichkariga kirmaydi.':'Оставьте пакет у двери. Волонтёр внутрь не заходит.'}</div></div>
-      <div class="stp"><div class="num">👤</div><div class="tx">${uz?'Ilovada ko\'ngillining ismi va rasmi ko\'rinadi.':'В приложении видно имя и фото волонтёра.'}</div></div>
-      <div class="stp"><div class="num">⭐</div><div class="tx">${uz?'Har bir buyurtmadan keyin baho qo\'ying — bu xizmatni yaxshilashga yordam beradi.':'После каждой заявки ставьте оценку — это помогает улучшать сервис.'}</div></div>
+      <div class="stp"><div class="num">🔒</div><div class="tx">Оставьте пакет у двери. Волонтёр внутрь не заходит.</div></div>
+      <div class="stp"><div class="num">👤</div><div class="tx">В приложении видно имя и фото волонтёра.</div></div>
+      <div class="stp"><div class="num">⭐</div><div class="tx">После каждой заявки ставьте оценку — это помогает улучшать сервис.</div></div>
     </div>
     ${obDots(1)}
-    <button class="q-btn" style="max-width:300px" onclick="obNext()">${uz?'Davom etish':'Далее'}</button>
+    <button class="q-btn" style="max-width:300px" onclick="obNext()">Далее</button>
   </div></div>`;
 }
 function obRulesView(){
-  const uz=S.set.lang==='uz';
   return `<div class="scroll"><div class="q-ob">
     <div class="e">⚠️</div>
-    <h2>${uz?'Nimani chiqarish mumkin emas':'Что нельзя выносить'}</h2>
-    <p>${uz?'Ko\'ngillilar faqat oddiy maishiy chiqindini olib ketadi.':'Волонтёры забирают только обычный бытовой мусор.'}</p>
+    <h2>Что нельзя выносить</h2>
+    <p>Волонтёры забирают только обычный бытовой мусор.</p>
     <div class="steps">
-      <div class="stp"><div class="num">🚫</div><div class="tx">${uz?'Batareyalar, lampalar, tibbiy chiqindi':'Батарейки, лампы, медицинские отходы'}</div></div>
-      <div class="stp"><div class="num">🚫</div><div class="tx">${uz?'Qurilish chiqindisi, bo\'yoq, suyuqliklar':'Строительный мусор, краски, жидкости'}</div></div>
-      <div class="stp"><div class="num">✅</div><div class="tx">${uz?'Paketlar, quti, shisha, bankalar — hammasi mumkin':'Пакеты, коробки, стекло, банки — всё можно'}</div></div>
+      <div class="stp"><div class="num">🚫</div><div class="tx">Батарейки, лампы, медицинские отходы</div></div>
+      <div class="stp"><div class="num">🚫</div><div class="tx">Строительный мусор, краски, жидкости</div></div>
+      <div class="stp"><div class="num">✅</div><div class="tx">Пакеты, коробки, стекло, банки — всё можно</div></div>
     </div>
     ${obDots(2)}
-    <button class="q-btn" style="max-width:300px" onclick="obFinish()">${uz?'Boshlash':'Начать'}</button>
+    <button class="q-btn" style="max-width:300px" onclick="obFinish()">Начать</button>
   </div></div>`;
 }
 function obSetLang(l){
@@ -1621,6 +1621,64 @@ const UZ={
 "Дилноза":"Dilnoza","Тимур":"Temur","Азиза":"Aziza","Чиланзар-9":"Chilonzor-9",
 /* подпись на главной кнопке меняется по времени суток */
 "Доброе утро":"Xayrli tong","Добрый вечер":"Xayrli kech",
+/* связь с сервером — полоска над экраном */
+"Не удалось подключиться":"Ulanib bo‘lmadi",
+"Нет связи с сервером":"Server bilan aloqa yo‘q",
+"Нет связи — показываем сохранённые данные":
+  "Aloqa yo‘q — saqlangan ma’lumotlarni ko‘rsatyapmiz",
+"Нет доступа к базе — проверьте правила Firebase":
+  "Bazaga ruxsat yo‘q — Firebase qoidalarini tekshiring",
+"Попробовать ещё раз":"Yana urinib ko‘rish",
+/* геопозиция */
+"Добавить геопозицию":"Joylashuvni qo‘shish","Определить":"Aniqlash",
+"Вы здесь":"Siz shu yerdasiz",
+"Волонтёры увидят расстояние и быстрее возьмут заявку":
+  "Ko‘ngillilar masofani ko‘radi va buyurtmani tezroq oladi",
+"Заявку всё равно можно отправить — волонтёр найдёт по адресу":
+  "Buyurtmani baribir yuborsa bo‘ladi — ko‘ngilli manzil bo‘yicha topadi",
+/* роли и имена по умолчанию */
+"Житель":"Yashovchi","Волонтёр":"Ko‘ngilli","Сосед":"Qo‘shni",
+"Гость":"Mehmon","Без имени":"Ismsiz",
+"Теперь вы волонтёр":"Endi siz ko‘ngillisiz","Теперь вы житель":"Endi siz yashovchisiz",
+/* подсказки и пустые состояния */
+"Ближайшие заявки — ниже, к назначенному времени":
+  "Eng yaqin buyurtmalar — quyida, belgilangan vaqtga",
+"Обычно кто-то берёт за 10–20 минут. Сейчас все заняты или далеко.":
+  "Odatda kimdir 10–20 daqiqada oladi. Hozir hamma band yoki uzoqda.",
+"Пока в вашем доме никто не закрыл заявку":
+  "Hozircha uyingizda hech kim buyurtmani yopmagan",
+"Укажите дом в профиле, чтобы участвовать":
+  "Qatnashish uchun profilda uyni ko‘rsating",
+"Сначала закройте текущую":"Avval joriysini yoping",
+/* короткие сообщения проверки полей */
+"Укажите адрес":"Manzilni ko‘rsating","Укажите дом":"Uyni ko‘rsating",
+"Укажите район":"Tumanni ko‘rsating",
+/* радиус поиска */
+"500 м":"500 m","1 км":"1 km","3 км":"3 km",
+/* онбординг */
+"Мусор вынесут за вас":"Chiqindini olib ketamiz",
+"Qulay — соседи-волонтёры заберут мусор от вашей двери до контейнера. Бесплатно.":
+  "Qulay — qo‘shni ko‘ngillilar chiqindini uyingizdan konteynergacha olib borishadi. Bepul.",
+"Оставьте заявку — укажите адрес и время":"Buyurtma qoldiring — manzil va vaqtni tanlang",
+"Волонтёр придёт и заберёт пакет":"Ko‘ngilli keladi va paketni oladi",
+"Видите на карте — мусор доехал до контейнера":
+  "Xaritada ko‘ring — chiqindi konteynergacha yetdi",
+"Далее":"Davom etish","Начать":"Boshlash","Безопасность":"Xavfsizlik",
+"Несколько простых правил для спокойствия каждого.":
+  "Barchaning xotirjamligi uchun bir necha oddiy qoidalar.",
+"Оставьте пакет у двери. Волонтёр внутрь не заходит.":
+  "Paketni eshik oldiga qo‘ying. Ko‘ngilli ichkariga kirmaydi.",
+"В приложении видно имя и фото волонтёра.":
+  "Ilovada ko‘ngillining ismi va rasmi ko‘rinadi.",
+"После каждой заявки ставьте оценку — это помогает улучшать сервис.":
+  "Har bir buyurtmadan keyin baho qo‘ying — bu xizmatni yaxshilashga yordam beradi.",
+"Что нельзя выносить":"Nimani chiqarish mumkin emas",
+"Волонтёры забирают только обычный бытовой мусор.":
+  "Ko‘ngillilar faqat oddiy maishiy chiqindini olib ketadi.",
+"Батарейки, лампы, медицинские отходы":"Batareyalar, lampalar, tibbiy chiqindi",
+"Строительный мусор, краски, жидкости":"Qurilish chiqindisi, bo‘yoq, suyuqliklar",
+"Пакеты, коробки, стекло, банки — всё можно":
+  "Paketlar, quti, shisha, bankalar — hammasi mumkin",
 "Отправить":"Yuborish","Скопировать номер":"Raqamdan nusxa olish",
 "Связаться с волонтёром":"Ko‘ngilli bilan bog‘lanish",
 "Связаться с жителем":"Yashovchi bilan bog‘lanish",
@@ -1947,6 +2005,14 @@ const UZ_RE=[
 /* Словарь молчит, когда строки в нём нет: текст просто остаётся русским, и
    заметить это можно только глазами на каждом экране. Копим пропущенное —
    god-панель показывает список, и его видно сразу, а не через месяц. */
+/* Перевод строки «на месте» — для текста, который не попадает в обход DOM:
+   подсказки на карте Leaflet рисуются после localize(), полоска связи лежит
+   рядом с #app. Возвращает исходную строку, если перевода нет. */
+function uzs(s){
+  if(S.set.lang!=='uz'||!s) return s;
+  const v=uzText(s);
+  return v==null?s:v;
+}
 const uzMissing=new Set();
 function noteMissing(s){
   const k=String(s).replace(/\s+/g,' ').trim();
@@ -1997,6 +2063,7 @@ function render(){
   if(S.ob>=0&&S.ob<=3){
     const OB=[obLangView,obWelcomeView,obSafetyView,obRulesView];
     $('#app').innerHTML=(OB[S.ob]||OB[0])();
+    localize($('#app'));       // онбординг переводится так же, как все экраны
     fitViewport(); return }
   if(!S.ready){ $('#app').innerHTML=`<div class="scroll"><div class="pad">
     <div class="q-empty" style="margin:auto"><div class="e">🌿</div>
@@ -2255,7 +2322,7 @@ function afterRender(){
       touchZoom:true,scrollWheelZoom:false}).setView(ctr,16);
     tileLayer().addTo(mapLive);
     if(o&&o.lat!=null) L.marker([o.lat,o.lng],{icon:greenIcon()}).addTo(mapLive)
-      .bindPopup(esc(A(o)));
+      .bindPopup(esc(uzs(A(o))));
     const vLat=o&&o.volunteerLat, vLng=o&&o.volunteerLng;
     if(vLat!=null&&vLng!=null){
       liveMarker=L.marker([vLat,vLng],{icon:volIcon()}).addTo(mapLive);
@@ -2284,7 +2351,7 @@ function afterRender(){
     mapVol=L.map(volEl,{zoomControl:false,attributionControl:false}).setView(ctr,14);
     tileLayer().addTo(mapVol);
     if(S.geo) L.marker([S.geo.lat,S.geo.lng],{icon:volIcon()}).addTo(mapVol)
-      .bindPopup('Вы здесь');
+      .bindPopup(esc(uzs('Вы здесь')));
     updateVolMarkers();
     setTimeout(()=>mapVol.invalidateSize(),200);
   } else if(mapVol&&document.getElementById('map-orders')){
@@ -2301,7 +2368,7 @@ function updateVolMarkers(){
     if(o.lat==null) return;
     const m=L.marker([o.lat,o.lng],{icon:orderIcon()}).addTo(mapVol);
     // заявка ещё не взята — квартиру и подъезд не показываем
-    m.bindPopup(`<b>${esc(Ashort(o))}</b><br>${esc(o.bags||'')}`);
+    m.bindPopup(`<b>${esc(uzs(Ashort(o)))}</b><br>${esc(uzs(o.bags||''))}`);
     m.on('click',()=>m.openPopup());
     volMarkers.push(m);
   });
@@ -2339,9 +2406,11 @@ function stopGeoTrack(){
 
 function toast(m){const t=$("#toast");t.textContent=(S.set.lang==="uz"&&uzText(m))||m;t.classList.add('on');
   clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('on'),2600)}
+/* Полоска связи живёт рядом с #app, а не внутри — обходчик localize() до неё
+   не доходит, поэтому переводим здесь сами, как это делает toast(). */
 function conn(msg){const c=$('#conn');
   if(!msg){c.classList.remove('show');return}
-  c.textContent=msg;c.classList.add('show')}
+  c.textContent=(S.set.lang==='uz'&&uzText(msg))||msg;c.classList.add('show')}
 
 /* ================= подключение ================= */
 function boot(){
