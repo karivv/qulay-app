@@ -1716,6 +1716,14 @@ const UZ={
 "Не удалось отправить — проверьте правила Firebase":
   "Yuborib bo‘lmadi — Firebase qoidalarini tekshiring",
 "Список очищен":"Ro‘yxat tozalandi","Список скопирован":"Ro‘yxat nusxalandi",
+/* заявку изменила вторая сторона, пока экран был открыт */
+"Эта заявка уже завершена":"Bu buyurtma allaqachon yakunlangan",
+"Такой заявки больше нет":"Bunday buyurtma endi yo‘q",
+"Эта заявка сейчас не за вами":"Bu buyurtma hozir sizda emas",
+"Статус заявки изменился":"Buyurtma holati o‘zgardi",
+"Не удалось вернуть заявку":"Buyurtmani qaytarib bo‘lmadi",
+"Заявка вернулась другим волонтёрам":"Buyurtma boshqa ko‘ngillilarga qaytdi",
+"Не удалось отменить":"Bekor qilib bo‘lmadi","Заявка отменена":"Buyurtma bekor qilindi",
 "Проложить маршрут":"Marshrut qurish","Сколько получилось":"Qancha chiqdi",
 "Позвонить":"Qo‘ng‘iroq qilish","Закрыть":"Yopish","Позже сегодня":"Bugun keyinroq",
 "до 3 кг":"3 kg gacha","больше 15":"15 dan ortiq",
@@ -2039,9 +2047,22 @@ function uzText(s){
   const m=String(s).match(/^(\s*)([\s\S]*?)(\s*)$/);
   const k=m[2].replace(/\s+/g,' ');
   if(!k) return null;
+  let v=uzOne(k);
+  /* Строки часто склеиваются на лету: «Житель выносит пакет · Один пакет».
+     Целиком такого в словаре нет и быть не может — комбинаций слишком много,
+     поэтому, если не нашли, переводим куски вокруг разделителя по отдельности. */
+  if(v==null&&k.includes(' · ')){
+    const parts=k.split(' · '), out=parts.map(p=>uzOne(p));
+    if(out.some(x=>x!=null)) v=parts.map((p,i)=>out[i]==null?p:out[i]).join(' · ');
+  }
+  return v==null?null:m[1]+v+m[3];
+}
+/* Одна фраза: сначала точное совпадение, потом шаблоны с числами и именами. */
+function uzOne(k){
+  if(!k) return null;
   let v=UZ[k];
   if(v==null){ for(const [re,to] of UZ_RE){ if(re.test(k)){ v=k.replace(re,to); break } } }
-  return v==null?null:m[1]+v+m[3];
+  return v==null?null:v;
 }
 /* Проходим по текстовым узлам готового экрана. Код и обработчики не трогаем. */
 function localize(root){
@@ -2109,11 +2130,26 @@ function closeLb(){ S.lb=null; render() }
 /* ===== «Связаться»: звонок + готовые фразы =====
    Фразы дублируют то, ради чего обычно звонят. Звонок остаётся, но перестаёт
    быть единственным способом — многим проще нажать, чем говорить. */
+/* Готовые фразы — системный текст, а не то, что человек написал сам. Поэтому
+   отправляем ключ, а получатель видит фразу на СВОЁМ языке: узбекоязычный
+   волонтёр не должен получать русское «Код домофона — напишу в чате» только
+   потому, что нажал его русскоязычный житель. Русский текст рядом — и для
+   показа отправителю, и как запас для старых записей без ключа. */
+const PHRASE_RU={
+  ph_intercom:'Код домофона — напишу в чате',
+  ph_lift:'Лифт не работает',
+  ph_at_door:'Пакет уже у двери',
+  ph_two_min:'Выйду через пару минут',
+  ph_intercom_broken:'Домофон не работает, позвоните',
+  ph_coming:'Подхожу, буду через пару минут',
+  ph_at_entrance:'Я у подъезда',
+  ph_cant_open:'Не могу открыть дверь',
+  ph_delayed:'Задержусь минут на десять',
+  ph_took_it:'Пакет забрал, несу к контейнеру'
+};
 const PHRASES={
-  cl:['Код домофона — напишу в чате','Лифт не работает','Пакет уже у двери',
-      'Выйду через пару минут','Домофон не работает, позвоните'],
-  vo:['Подхожу, буду через пару минут','Я у подъезда','Не могу открыть дверь',
-      'Задержусь минут на десять','Пакет забрал, несу к контейнеру']
+  cl:['ph_intercom','ph_lift','ph_at_door','ph_two_min','ph_intercom_broken'],
+  vo:['ph_coming','ph_at_entrance','ph_cant_open','ph_delayed','ph_took_it']
 };
 function contactSide(){
   const o=ROLE==='cl'?S.myOrder:S.activeJob;
@@ -2153,17 +2189,17 @@ function contactView(){
       <button onclick="sendTyped()" aria-label="Отправить">➤</button>
     </div>
     <div class="q-lbl" style="margin:14px 0 8px">Быстрые фразы</div>
-    ${list.map(t=>`<button class="ph" onclick="sendPhrase(${JSON.stringify(t).replace(/"/g,'&quot;')})">
-      <span>💬</span><span>${esc(t)}</span></button>`).join('')}
+    ${list.map(k=>`<button class="ph" onclick="sendPhrase('${k}')">
+      <span>💬</span><span>${esc(PHRASE_RU[k]||k)}</span></button>`).join('')}
     <button class="x" onclick="closeContact()">Закрыть</button>
   </div></div>`;
 }
 function sendTyped(){
   const el=document.getElementById('c_msg'); if(!el) return;
-  const t=(el.value||'').trim();
-  if(!t){ toast('Напишите сообщение'); return }
-  if(t.length>500){ toast('Слишком длинно'); return }
-  sendPhrase(t);
+  const v=(el.value||'').trim();
+  if(!v){ toast('Напишите сообщение'); return }
+  if(v.length>500){ toast('Слишком длинно'); return }
+  sendMsg(null,v);
 }
 /* На iPhone Telegram глотает tel: наглухо — там единственный рабочий путь
    отдать номер человеку в буфер, чтобы он вставил его в звонилку. */
@@ -2187,15 +2223,24 @@ function dial(phone,ev){
   if(ev) ev.preventDefault();
   return false;
 }
-function sendPhrase(text){
+/* key — готовая фраза: уходит ключом и переводится у ПОЛУЧАТЕЛЯ.
+   free — то, что человек написал сам: уходит дословно, чужой текст
+   переводить нельзя. */
+function sendMsg(key,free){
   const p=contactSide(); const o=ROLE==='cl'?S.myOrder:S.activeJob;
   if(!p||!p.id||!o||!db){ toast('Нет связи с сервером'); return }
-  db.ref('orderMsgs').push({
+  const payload={
     orderId:o.id, toUid:String(p.id), fromUid:uid, fromName:MYNAME(),
-    fromRole:ROLE==='cl'?'client':'volunteer', text, at:Date.now()
-  }).then(()=>{ hap('success'); S.draft=''; closeContact(); toast('Отправлено') })
+    fromRole:ROLE==='cl'?'client':'volunteer', at:Date.now(),
+    // text оставляем всегда — это запас для читателей, не знающих про ключи
+    text:key?(PHRASE_RU[key]||key):free
+  };
+  if(key) payload.textKey=key;
+  db.ref('orderMsgs').push(payload)
+   .then(()=>{ hap('success'); S.draft=''; closeContact(); toast('Отправлено') })
    .catch(()=>toast('Не удалось отправить — проверьте правила Firebase'));
 }
+function sendPhrase(key){ sendMsg(key,null) }
 /* Пока волонтёр в пути, двигаем точку и минуты точечно — без пересборки
    всего экрана: полная перерисовка сбрасывает прокрутку и тормозит. */
 function tickLive(){
@@ -2903,9 +2948,19 @@ function submit(){
 }
 function cancelOrder(){
   const o=S.myOrder; if(!o) return;
-  const doIt=()=>db.ref('orders/'+o.id).update({status:'cancelled',cancelledBy:'client'})
-    .then(()=>{ S.myOrder=null; S.noVol=false; S.view='home'; render(); toast('Заявка отменена') })
-    .catch(()=>toast('Не удалось отменить'));
+  // волонтёр мог закрыть заявку ровно в этот момент — отменять уже нечего
+  const doIt=()=>{
+    let done=false;
+    db.ref('orders/'+o.id).transaction(cur=>{
+      if(!cur) return;
+      if(ORDER_TERMINAL.includes(cur.status)){ done=true; return }
+      return {...cur,status:'cancelled',cancelledBy:'client'};
+    },(err,committed)=>{
+      S.myOrder=null; S.noVol=false; S.view='home'; render();
+      toast(done?'Эта заявка уже завершена'
+        :(err||!committed)?'Не удалось отменить':'Заявка отменена');
+    });
+  };
   // пока никто не взял — отменяем сразу; волонтёр уже идёт — переспрашиваем
   if(phaseOf(o)>=1) ask('Волонтёр уже идёт к вам. Отменить заявку?',doIt); else doIt();
 }
@@ -2924,13 +2979,35 @@ function claim(id){
     hap('success'); toast('Заявка ваша — житель видит, что вы в пути');
   }).catch(()=>toast('Не удалось взять заявку'));
 }
+/* Те же правила переходов, что и у бота: из какого статуса какое действие
+   допустимо. Заявку могли закрыть или отменить со второй стороны, пока экран
+   висел открытым — тогда запись поверх воскресила бы закрытую заявку. */
+const ORDER_ALLOWED={arrived:['taken'],picked:['arrived'],done:['picked']};
+const ORDER_TERMINAL=['done','cancelled'];
 function setStatus(s){
-  const o=S.activeJob; if(!o) return;
+  const o=S.activeJob; if(!o||!db) return;
   const upd={status:s};
   if(s==='arrived') upd.arrivedAt=Date.now();
   if(s==='picked') upd.pickedAt=Date.now();
   if(s==='done'){ upd.doneAt=Date.now(); upd.photo=!!S.photoURL; upd.kg=S.kg }
-  db.ref('orders/'+o.id).update(upd).then(()=>{
+  let why='';
+  db.ref('orders/'+o.id).transaction(cur=>{
+    if(!cur){ why='gone'; return }                       // заявку удалили
+    if(ORDER_TERMINAL.includes(cur.status)){ why='terminal'; return }
+    if(String(cur.volunteerId||'')!==String(uid)){ why='not_yours'; return }
+    if(!(ORDER_ALLOWED[s]||[]).includes(cur.status)){ why='wrong_state'; return }
+    return {...cur,...upd};
+  },(err,committed,snap)=>{
+    if(err||!committed){
+      hap('error');
+      toast(why==='terminal'?'Эта заявка уже завершена'
+        :why==='gone'?'Такой заявки больше нет'
+        :why==='not_yours'?'Эта заявка сейчас не за вами'
+        :'Статус заявки изменился');
+      S.activeJob=null; S.view='home'; render();
+      return;
+    }
+    const fresh=snap&&snap.val()?snap.val():{...o,...upd};
     hap(s==='done'?'success':'medium');
     if(s==='done'){
       // сам снимок кладём отдельно от заявки: список заявок читают все,
@@ -2938,26 +3015,35 @@ function setStatus(s){
       if(S.photoURL) db.ref('orderPhotos/'+o.id).set({
         img:S.photoURL, at:Date.now(), by:uid
       }).catch(()=>toast('Фото не сохранилось — проверьте правила Firebase'));
-      S.finOrder={...o,...upd}; S.activeJob=null; S.photoURL=null; S.kg=5;
+      S.finOrder={id:o.id,...fresh}; S.activeJob=null; S.photoURL=null; S.kg=5;
       S.view='fin'; render();
     }
-  }).catch(()=>toast('Не удалось обновить статус'));
+  });
 }
 function giveUp(){
   const o=S.activeJob; if(!o) return;
   ask('Вернуть заявку другим волонтёрам? Житель узнает, что вы не придёте.',()=>giveUpNow(o));
 }
 function giveUpNow(o){
+  // возвращали cur без изменений — транзакция считалась успешной, и человек
+  // видел «заявка вернулась», даже когда возвращать было уже нечего
+  let why='';
   db.ref('orders/'+o.id).transaction(cur=>{
-    if(!cur||cur.volunteerId!==uid||cur.status==='done'||cur.status==='cancelled') return cur;
+    if(!cur){ why='gone'; return }
+    if(ORDER_TERMINAL.includes(cur.status)){ why='terminal'; return }
+    if(String(cur.volunteerId||'')!==String(uid)){ why='not_yours'; return }
     cur.status='open';
     cur.volunteerId=null; cur.volunteerName=null; cur.volunteerPhone=null;
     cur.takenAt=null; cur.arrivedAt=null; cur.pickedAt=null;
     return cur;
-  }).then(()=>{
+  },(err,committed)=>{
     S.activeJob=null; S.photoURL=null; S.view='home'; render();
-    toast('Заявка вернулась другим волонтёрам');
-  }).catch(()=>toast('Не удалось вернуть заявку'));
+    toast(why==='terminal'?'Эта заявка уже завершена'
+      :why==='gone'?'Такой заявки больше нет'
+      :why==='not_yours'?'Эта заявка сейчас не за вами'
+      :(err||!committed)?'Не удалось вернуть заявку'
+      :'Заявка вернулась другим волонтёрам');
+  });
 }
 /* Общий обработчик снимка: ужимает и отдаёт data URL в колбэк.
    max — длинная сторона в пикселях, q — качество JPEG. */
