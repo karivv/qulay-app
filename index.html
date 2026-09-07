@@ -899,7 +899,7 @@ function obRulesView(){
   </div></div>`;
 }
 function obSetLang(l){
-  S.set.lang=l; saveSet(); S.ob=1; render();
+  S.set.lang=l; saveSet(); syncLang(l); S.ob=1; render();
 }
 function obNext(){
   S.ob++; render();
@@ -1611,6 +1611,38 @@ const UZ={
 "Оценки обо мне":"Men haqimdagi baholar","Оценок пока нет":"Hozircha baho yo‘q",
 "Пакет забрал":"Paketni oldim","Повторить":"Takrorlash","Подождать ещё":"Yana kutish",
 "Сейчас закрыто":"Hozir yopiq","Скоро закрытие":"Tez orada yopiladi",
+/* лист «Связаться» */
+"Быстрые фразы":"Tez iboralar",
+"Напишите или позвоните — сообщение придёт в чат Qulay":
+  "Yozing yoki qo‘ng‘iroq qiling — xabar Qulay chatiga keladi",
+"Написать сообщение…":"Xabar yozish…",
+"Отправить":"Yuborish","Скопировать номер":"Raqamdan nusxa olish",
+"Связаться с волонтёром":"Ko‘ngilli bilan bog‘lanish",
+"Связаться с жителем":"Yashovchi bilan bog‘lanish",
+"Схема маршрута волонтёра":"Ko‘ngilli marshruti sxemasi",
+/* готовые фразы жителя и волонтёра */
+"Код домофона — напишу в чате":"Domofon kodi — chatda yozaman",
+"Лифт не работает":"Lift ishlamayapti",
+"Пакет уже у двери":"Paket eshik oldida",
+"Выйду через пару минут":"Bir-ikki daqiqada chiqaman",
+"Домофон не работает, позвоните":"Domofon ishlamayapti, qo‘ng‘iroq qiling",
+"Подхожу, буду через пару минут":"Yaqinlashyapman, bir-ikki daqiqada bo‘laman",
+"Я у подъезда":"Podez oldidaman",
+"Не могу открыть дверь":"Eshikni ocha olmayapman",
+"Задержусь минут на десять":"O‘n daqiqacha kechikaman",
+"Пакет забрал, несу к контейнеру":"Paketni oldim, konteynerga olib ketyapman",
+/* карта и геопозиция */
+"📍 Определить моё место":"📍 Joyimni aniqlash",
+"🧭 Проложить маршрут":"🧭 Marshrut qurish",
+"Геопозиция недоступна":"Joylashuv mavjud emas",
+"У этой заявки нет точки на карте":"Bu buyurtmada xaritada nuqta yo‘q",
+"кг":"kg",
+/* сообщения-подсказки */
+"Напишите сообщение":"Xabar yozing","Слишком длинно":"Juda uzun",
+"Отправлено":"Yuborildi","Не удалось скопировать":"Nusxalab bo‘lmadi",
+"Не удалось отправить — проверьте правила Firebase":
+  "Yuborib bo‘lmadi — Firebase qoidalarini tekshiring",
+"Список очищен":"Ro‘yxat tozalandi","Список скопирован":"Ro‘yxat nusxalandi",
 "Проложить маршрут":"Marshrut qurish","Сколько получилось":"Qancha chiqdi",
 "Позвонить":"Qo‘ng‘iroq qilish","Закрыть":"Yopish","Позже сегодня":"Bugun keyinroq",
 "до 3 кг":"3 kg gacha","больше 15":"15 dan ortiq",
@@ -1899,6 +1931,10 @@ const UZ_RE=[
   [/^к (\d\d:\d\d)$/,"$1 ga"],
   [/^(\d+) заявк\S*$/,"$1 ta buyurtma"],
   [/^Фото у контейнера · (.+)$/,"Konteyner oldida rasm · $1"],
+  [/^Номер скопирован: (.+)$/,"Raqam nusxalandi: $1"],
+  [/^Оценка (\d+)$/,"Baho $1"],
+  [/^Волонтёр не нашёлся до (.+) — попробуйте утром$/,
+   "$1 gacha ko‘ngilli topilmadi — ertalab urinib ko‘ring"],
 ];
 /* Словарь молчит, когда строки в нём нет: текст просто остаётся русским, и
    заметить это можно только глазами на каждом экране. Копим пропущенное —
@@ -1935,8 +1971,14 @@ function localize(root){
       // иначе она попадает в собственный список и растёт с каждым заходом
       if(n.parentElement&&n.parentElement.closest('[data-nouz]')) return;
       noteMissing(n.nodeValue) });
-    root.querySelectorAll('[placeholder]').forEach(el=>{
-      const v=UZ[el.getAttribute('placeholder')]; if(v) el.setAttribute('placeholder',v);
+    // атрибуты — не текстовые узлы, обходчик до них не доходит: aria-label
+    // читает озвучка экрана, и без этого она осталась бы русской
+    ['placeholder','aria-label','title'].forEach(attr=>{
+      root.querySelectorAll('['+attr+']').forEach(el=>{
+        const raw=el.getAttribute(attr);
+        const v=UZ[raw]!=null?UZ[raw]:uzText(raw);
+        if(v!=null&&v!==raw) el.setAttribute(attr,v);
+      });
     });
   }catch(e){}
 }
@@ -2319,6 +2361,11 @@ function loadProfile(attempt){
       // роль из базы — источник правды, но только если она там вообще есть:
       // пустое поле не должно молча понизить волонтёра до жителя
       if(v.role) lockRole(v.role);
+      // язык из профиля — тот же, что выбран у бота; ?lang= в ссылке важнее,
+      // потому что бот кладёт туда актуальное значение при открытии
+      if((v.lang==='ru'||v.lang==='uz')&&!P.get('lang')&&v.lang!==S.set.lang){
+        S.set.lang=v.lang; saveSet();
+      }
       me={name:v.name||'',phone:v.phone,role:ROLE,house:v.house||'',district:v.district||'',
           blocked:!!v.blocked,
           createdAt:v.createdAt||Date.now(),addr:me&&me.addr?me.addr:S.addr};
@@ -2482,8 +2529,15 @@ function setTheme(t){S.set.theme=t;saveSet();render();
   toast(t==='auto'?'Как в телефоне':t==='dark'?'Тёмная тема':'Светлая тема')}
 function setBig(b){S.set.big=b;saveSet();render();toast(b?'Крупный текст':'Обычный текст')}
 function setRadius(r){S.set.radius=r;saveSet();render();toast('Радиус: '+r)}
-function setLang(l){S.set.lang=l;saveSet();render();
+function setLang(l){S.set.lang=l;saveSet();syncLang(l);render();
   toast(l==='uz'?'Interfeys o‘zbekchaga o‘tdi':'Интерфейс на русском')}
+/* Язык у бота и у приложения общий: бот читает users/{uid}/lang, поэтому
+   выбор, сделанный здесь, должен туда попасть — иначе человек переключит
+   язык в приложении, а уведомления продолжат приходить на прежнем. */
+function syncLang(l){
+  if(!db||!uid) return;
+  db.ref('users/'+uid+'/lang').set(l).catch(()=>{});
+}
 function tgl(k){S.set[k]=!S.set[k];saveSet();render();toast(S.set[k]?'Включено':'Выключено')}
 function tglReason(r){const i=S.reasons.indexOf(r); if(i<0)S.reasons.push(r); else S.reasons.splice(i,1); render()}
 function rate(n){S.rating=n; if(n>3)S.reasons=[]; hap('light'); render()}
